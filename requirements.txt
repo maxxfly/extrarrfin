@@ -1,0 +1,5 @@
+requests>=2.31.0
+click>=8.1.7
+yt-dlp>=2023.12.30
+PyYAML>=6.0.1
+rich>=13.7.0

@@ -1,0 +1,25 @@
+# ExtrarrFin Configuration
+
+# Your Sonarr instance URL (without trailing slash)
+sonarr_url: "http://localhost:8989"
+
+# Sonarr API key (found in Settings > General)
+sonarr_api_key: "your_api_key_here"
+
+# Directory where your media is located (optional)
+# If you run the script on a different machine than Sonarr
+media_directory: "/path/to/your/media"
+
+# Root directory configured in Sonarr (optional)
+# Used to map between Sonarr path and real path
+sonarr_directory: "/path/to/sonarr/media"
+
+# yt-dlp download format
+# Default: best quality MP4 available
+yt_dlp_format: "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+
+# Maximum number of YouTube results to consider
+max_results: 1
+
+# Log level (DEBUG, INFO, WARNING, ERROR)
+log_level: "INFO"
