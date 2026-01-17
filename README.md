@@ -13,6 +13,8 @@
 - 🎚️ **Filtering**: Ability to limit to a specific series with `--limit`
 - ⚙️ **Flexible configuration**: YAML file, environment variables or CLI arguments
 - 📂 **Directory mapping**: Support for remote execution with path mapping
+- ⏰ **Schedule mode**: Automatic periodic downloads with configurable intervals
+- 🐳 **Docker support**: Run in a container with Alpine-based image
 
 ## 📋 Prerequisites
 
@@ -23,6 +25,8 @@
 
 ## 🚀 Installation
 
+### Option 1: Standard Installation
+
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/extrarrfin.git
@@ -30,6 +34,17 @@ cd extrarrfin
 
 # Install dependencies
 pip install -r requirements.txt
+```
+
+### Option 2: Docker Installation
+
+```bash
+# Pull the image from Docker Hub
+docker pull jeanmary/extrarrfin:latest
+
+# Or use docker-compose (recommended)
+# Create a docker-compose.yml file and run:
+docker-compose up -d
 ```
 
 ### Installing system dependencies
@@ -77,6 +92,11 @@ yt_dlp_format: "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
 
 # Log level
 log_level: "INFO"
+
+# Schedule mode (optional)
+schedule_enabled: false
+schedule_interval: 6
+schedule_unit: "hours"  # seconds, minutes, hours, days, weeks
 ```
 
 ### Option 2: Environment variables
@@ -144,6 +164,28 @@ python extrarrfin.py download --no-scan
 # Trigger a manual scan for a series
 python extrarrfin.py scan 42
 ```
+
+#### `schedule-mode` - Automatic periodic downloads
+
+```bash
+# Run with config file settings
+python extrarrfin.py schedule-mode
+
+# Override interval and unit
+python extrarrfin.py schedule-mode --interval 30 --unit minutes
+
+# With other options
+python extrarrfin.py schedule-mode --interval 6 --unit hours --limit "Series Name"
+
+# Dry-run mode for testing
+python extrarrfin.py schedule-mode --dry-run --interval 5 --unit minutes
+```
+
+Schedule mode will:
+- Run immediately on start
+- Execute downloads at the specified interval
+- Continue running until stopped with Ctrl+C
+- Display clear information about each execution and next run
 
 ### Global options
 
@@ -284,7 +326,38 @@ sonarr_directory: "/path/in/sonarr"
 
 ## 📝 Advanced examples
 
-### Automation with cron
+### Schedule mode with systemd
+
+```bash
+# Create a systemd service file
+sudo nano /etc/systemd/system/extrarrfin.service
+```
+
+```ini
+[Unit]
+Description=ExtrarrFin Schedule Mode
+After=network.target
+
+[Service]
+Type=simple
+User=your-user
+WorkingDirectory=/home/user/extrarrfin
+ExecStart=/usr/bin/python3 /home/user/extrarrfin/extrarrfin.py --config /home/user/extrarrfin/config.yaml schedule-mode
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# Enable and start the service
+sudo systemctl enable extrarrfin
+sudo systemctl start extrarrfin
+sudo systemctl status extrarrfin
+```
+
+### Automation with cron (one-time runs)
 
 ```bash
 # Run every day at 2 AM
@@ -301,6 +374,109 @@ cd /home/user/extrarrfin
 source venv/bin/activate
 python extrarrfin.py download --log-level INFO
 deactivate
+```
+
+## 🐳 Docker Usage
+
+### Quick start with Docker
+
+```bash
+# Pull the image from Docker Hub
+docker pull jeanmary/extrarrfin:latest
+
+# Test connection
+docker run --rm \
+  -v $(pwd)/config.yaml:/config/config.yaml \
+  jeanmary/extrarrfin:latest --config /config/config.yaml test
+
+# List series
+docker run --rm \
+  -v $(pwd)/config.yaml:/config/config.yaml \
+  jeanmary/extrarrfin:latest --config /config/config.yaml list
+
+# Download episodes (one-time)
+docker run --rm \
+  -v $(pwd)/config.yaml:/config/config.yaml \
+  -v /path/to/media:/media \
+  jeanmary/extrarrfin:latest --config /config/config.yaml download
+```
+
+### Docker Compose (recommended for schedule mode)
+
+1. Create a `config` directory and copy your configuration:
+
+```bash
+mkdir config
+cp config.yaml config/
+```
+
+2. Edit `docker-compose.yml` to adjust paths and settings:
+
+```yaml
+version: '3.8'
+
+services:
+  extrarrfin:
+    image: jeanmary/extrarrfin:latest
+    container_name: extrarrfin
+    restart: unless-stopped
+    volumes:
+      - ./config:/config
+      - /path/to/your/media:/media
+    environment:
+      - SONARR_URL=http://sonarr:8989
+      - SONARR_API_KEY=your_api_key_here
+      - MEDIA_DIRECTORY=/media
+      - SONARR_DIRECTORY=/media
+    command: ["--config", "/config/config.yaml", "schedule-mode"]
+    networks:
+      - media
+
+networks:
+  media:
+    external: true
+    name: your_existing_network
+```
+
+3. Start the container:
+
+```bash
+# Start in detached mode
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop
+docker-compose down
+```
+
+### Docker environment variables
+
+You can override config with environment variables:
+
+```bash
+docker run --rm \
+  -e SONARR_URL=http://sonarr:8989 \
+  -e SONARR_API_KEY=your_key \
+  -e MEDIA_DIRECTORY=/media \
+  -v /path/to/media:/media \
+  jeanmary/extrarrfin:latest download
+```
+
+### Docker with existing Sonarr network
+
+If Sonarr is already running in Docker:
+
+```bash
+# Find Sonarr's network
+docker network ls
+
+# Use the same network in docker-compose.yml
+networks:
+  media:
+    external: true
+    name: sonarr_network_name
 ```
 
 ## 🤝 Contributing

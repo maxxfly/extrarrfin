@@ -23,3 +23,13 @@ max_results: 1
 
 # Log level (DEBUG, INFO, WARNING, ERROR)
 log_level: "INFO"
+
+# Schedule mode configuration
+# Enable schedule mode to run downloads automatically
+schedule_enabled: false
+
+# Schedule interval (how often to run)
+schedule_interval: 1
+
+# Schedule unit (seconds, minutes, hours, days, weeks)
+schedule_unit: "hours"

@@ -4,8 +4,10 @@ Command Line Interface (CLI) with Click
 
 import logging
 import sys
+import time
 
 import click
+import schedule
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
@@ -313,6 +315,101 @@ def test(ctx):
     except Exception as e:
         console.print(f"[red]✗ Connection error:[/red] {e}")
         sys.exit(1)
+
+
+@cli.command()
+@click.option("--limit", "-l", help="Limit to specific series (name or ID)")
+@click.option("--dry-run", "-d", is_flag=True, help="Simulation mode (don't download)")
+@click.option(
+    "--force",
+    "-f",
+    is_flag=True,
+    help="Force re-download even if file exists",
+)
+@click.option(
+    "--no-scan",
+    is_flag=True,
+    help="Don't trigger Sonarr scan after download",
+)
+@click.option(
+    "--interval",
+    type=int,
+    help="Override schedule interval from config",
+)
+@click.option(
+    "--unit",
+    type=click.Choice(["seconds", "minutes", "hours", "days", "weeks"]),
+    help="Override schedule unit from config",
+)
+@click.pass_context
+def schedule_mode(ctx, limit, dry_run, force, no_scan, interval, unit):
+    """Run downloads on a schedule"""
+
+    config: Config = ctx.obj["config"]
+
+    # Use command-line args if provided, otherwise use config
+    schedule_interval = interval if interval is not None else config.schedule_interval
+    schedule_unit = unit if unit is not None else config.schedule_unit
+
+    # Validate schedule unit
+    valid_units = ["seconds", "minutes", "hours", "days", "weeks"]
+    if schedule_unit not in valid_units:
+        console.print(f"[red]Invalid schedule unit:[/red] {schedule_unit}")
+        console.print(f"Valid units: {', '.join(valid_units)}")
+        sys.exit(1)
+
+    console.print("[bold cyan]ExtrarrFin - Schedule Mode[/bold cyan]")
+    console.print(f"Running downloads every {schedule_interval} {schedule_unit}")
+    console.print("Press Ctrl+C to stop\n")
+
+    def run_download():
+        """Run the download command"""
+        try:
+            console.print(f"\n[bold blue]{'=' * 60}[/bold blue]")
+            console.print(
+                f"[bold blue]Running scheduled download at {time.strftime('%Y-%m-%d %H:%M:%S')}[/bold blue]"
+            )
+            console.print(f"[bold blue]{'=' * 60}[/bold blue]\n")
+
+            # Call the download command logic
+            ctx.invoke(
+                download, limit=limit, dry_run=dry_run, force=force, no_scan=no_scan
+            )
+
+            console.print(
+                f"\n[dim]Next run in {schedule_interval} {schedule_unit}[/dim]"
+            )
+
+        except Exception as e:
+            console.print(f"[red]Error during scheduled download:[/red] {e}")
+            logger.exception("Error during scheduled download")
+
+    # Setup schedule based on unit
+    schedule_job = schedule.every(schedule_interval)
+
+    if schedule_unit == "seconds":
+        schedule_job.seconds.do(run_download)
+    elif schedule_unit == "minutes":
+        schedule_job.minutes.do(run_download)
+    elif schedule_unit == "hours":
+        schedule_job.hours.do(run_download)
+    elif schedule_unit == "days":
+        schedule_job.days.do(run_download)
+    elif schedule_unit == "weeks":
+        schedule_job.weeks.do(run_download)
+
+    # Run immediately on start
+    console.print("[yellow]Running initial download...[/yellow]")
+    run_download()
+
+    # Keep running
+    try:
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        console.print("\n\n[yellow]Schedule mode stopped by user[/yellow]")
+        sys.exit(0)
 
 
 def main():

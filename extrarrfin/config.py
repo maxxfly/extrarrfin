@@ -20,6 +20,9 @@ class Config:
     yt_dlp_format: str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
     max_results: int = 1
     log_level: str = "INFO"
+    schedule_enabled: bool = False
+    schedule_interval: int = 1
+    schedule_unit: str = "hours"
 
     @classmethod
     def from_file(cls, config_path: Path) -> "Config":

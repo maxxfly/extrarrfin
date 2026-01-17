@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  extrarrfin:
+    image: jeanmary/extrarrfin:latest
+    container_name: extrarrfin
+    restart: unless-stopped
+    volumes:
+      # Mount config directory
+      - ./config:/config
+      # Mount media directory (adjust path to match your setup)
+      - /path/to/your/media:/media
+    environment:
+      # Optional: Override config with environment variables
+      - SONARR_URL=${SONARR_URL:-http://sonarr:8989}
+      - SONARR_API_KEY=${SONARR_API_KEY}
+      - MEDIA_DIRECTORY=/media
+      - SONARR_DIRECTORY=/media
+    # Command to run schedule mode
+    command: ["--config", "/config/config.yaml", "schedule-mode"]
+    # Alternatively, run download once:
+    # command: ["--config", "/config/config.yaml", "download"]
+    networks:
+      - media
+
+networks:
+  media:
+    # If you have an existing network with Sonarr, use:
+    # external: true
+    # name: your_existing_network
