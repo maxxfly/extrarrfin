@@ -67,6 +67,7 @@ class SonarrClient:
                 seasons=seasons,
                 year=item.get("year"),
                 tvdb_id=item.get("tvdbId"),
+                network=item.get("network"),
             )
             series_list.append(series)
 

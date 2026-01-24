@@ -41,6 +41,7 @@ class Series:
     seasons: List[Season]
     year: int | None = None
     tvdb_id: int | None = None
+    network: str | None = None
 
 
 @dataclass

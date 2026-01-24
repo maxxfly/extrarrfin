@@ -92,17 +92,18 @@ class Downloader:
 
     def search_youtube(self, series: Series, episode: Episode) -> str | None:
         """
-        Search for a video on YouTube
-        Returns the URL of the first video found
+        Search for a video on YouTube with improved matching
+        Returns the URL of the best matching video found
 
         First tries: series title + episode title
         If not found, tries: episode title only
+        Uses a scoring system to find the best match
         """
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "extract_flat": True,
-            "default_search": "ytsearch1",
+            "default_search": "ytsearch5",  # Get top 5 results for better matching
             "sleep_requests": 1,  # Sleep 1 second between requests to avoid 429 errors
         }
 
@@ -116,23 +117,35 @@ class Downloader:
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    search_url = f"ytsearch1:{query_with_series}"
+                    search_url = f"ytsearch5:{query_with_series}"
                     if self.verbose:
                         logger.info(f"[VERBOSE] Full search URL: {search_url}")
 
                     result = ydl.extract_info(search_url, download=False)
 
                     if result and "entries" in result and result["entries"]:
-                        video = result["entries"][0]
-                        video_url = f"https://www.youtube.com/watch?v={video['id']}"
-                        if self.verbose:
-                            logger.info(f"[VERBOSE] Video found: {video.get('title')}")
-                            logger.info(f"[VERBOSE] Video URL: {video_url}")
-                        else:
-                            logger.info(
-                                f"Video found: {video.get('title')} - {video_url}"
+                        # Score each result to find the best match
+                        best_video = self._score_and_select_video(
+                            result["entries"], series, episode.title
+                        )
+
+                        if best_video:
+                            video_url = (
+                                f"https://www.youtube.com/watch?v={best_video['id']}"
                             )
-                        return video_url
+                            if self.verbose:
+                                logger.info(
+                                    f"[VERBOSE] Video found: {best_video.get('title')}"
+                                )
+                                logger.info(f"[VERBOSE] Video URL: {video_url}")
+                                logger.info(
+                                    f"[VERBOSE] Match score: {best_video.get('_score', 0):.2f}"
+                                )
+                            else:
+                                logger.info(
+                                    f"Video found: {best_video.get('title')} - {video_url}"
+                                )
+                            return video_url
             except Exception as e:
                 logger.error(f"Error during YouTube search: {e}")
 
@@ -147,25 +160,159 @@ class Downloader:
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    search_url = f"ytsearch1:{query_episode_only}"
+                    search_url = f"ytsearch5:{query_episode_only}"
                     if self.verbose:
                         logger.info(f"[VERBOSE] Full search URL: {search_url}")
 
                     result = ydl.extract_info(search_url, download=False)
 
                     if result and "entries" in result and result["entries"]:
-                        video = result["entries"][0]
-                        video_url = f"https://www.youtube.com/watch?v={video['id']}"
-                        if self.verbose:
-                            logger.info(f"[VERBOSE] Video found: {video.get('title')}")
-                            logger.info(f"[VERBOSE] Video URL: {video_url}")
-                        else:
-                            logger.info(
-                                f"Video found: {video.get('title')} - {video_url}"
+                        # Score each result to find the best match
+                        best_video = self._score_and_select_video(
+                            result["entries"], series, episode.title
+                        )
+
+                        if best_video:
+                            video_url = (
+                                f"https://www.youtube.com/watch?v={best_video['id']}"
                             )
-                        return video_url
+                            if self.verbose:
+                                logger.info(
+                                    f"[VERBOSE] Video found: {best_video.get('title')}"
+                                )
+                                logger.info(f"[VERBOSE] Video URL: {video_url}")
+                                logger.info(
+                                    f"[VERBOSE] Match score: {best_video.get('_score', 0):.2f}"
+                                )
+                            else:
+                                logger.info(
+                                    f"Video found: {best_video.get('title')} - {video_url}"
+                                )
+                            return video_url
             except Exception as e:
                 logger.error(f"Error during YouTube search: {e}")
+
+        return None
+
+    def _score_and_select_video(
+        self, videos: list, series: Series, episode_title: str
+    ) -> dict | None:
+        """
+        Score video results based on title matching and select the best one
+
+        Scoring factors:
+        - Exact title match: +100 points
+        - Contains episode title: +50 points
+        - Channel matches network: +40 points
+        - Word match ratio: +40 points max
+        - Contains series title: +30 points
+        - Shorter title (less extra content): +20 points max
+        - Official/verified channel indicators: +10 points
+
+        Returns the video with the highest score
+        """
+        if not videos:
+            return None
+
+        scored_videos = []
+
+        # Normalize strings for comparison
+        series_lower = series.title.lower()
+        episode_lower = episode_title.lower()
+        search_words = set((series.title + " " + episode_title).lower().split())
+        network_lower = series.network.lower() if series.network else None
+
+        if self.verbose and network_lower:
+            logger.info(f"[VERBOSE] Series network: {series.network}")
+
+        for video in videos:
+            if not video:
+                continue
+
+            title = video.get("title", "")
+            title_lower = title.lower()
+            channel = video.get("channel", "")
+            channel_lower = channel.lower()
+            score = 0
+
+            # Exact match (very rare but best case)
+            if (
+                title_lower == episode_lower
+                or title_lower == f"{series_lower} {episode_lower}"
+            ):
+                score += 100
+
+            # Contains episode title (case insensitive)
+            if episode_lower in title_lower:
+                score += 50
+
+            # Check if channel matches the network (high priority)
+            if network_lower and channel:
+                # Check for exact match or partial match
+                if network_lower in channel_lower or channel_lower in network_lower:
+                    score += 40
+                    if self.verbose:
+                        logger.info(
+                            f"[VERBOSE] Network match bonus: {channel} ~ {series.network}"
+                        )
+                # Check for common abbreviations (e.g., "BBC" in "BBC Studios")
+                elif len(network_lower) <= 5 and network_lower in channel_lower.split():
+                    score += 40
+                    if self.verbose:
+                        logger.info(
+                            f"[VERBOSE] Network abbreviation match: {channel} ~ {series.network}"
+                        )
+
+            # Word matching ratio
+            title_words = set(title_lower.split())
+            common_words = search_words & title_words
+            if search_words:
+                word_ratio = len(common_words) / len(search_words)
+                score += word_ratio * 40
+
+            # Contains series title
+            if series_lower in title_lower:
+                score += 30
+
+            # Word matching ratio
+            title_words = set(title_lower.split())
+            common_words = search_words & title_words
+            if search_words:
+                word_ratio = len(common_words) / len(search_words)
+                score += word_ratio * 40
+
+            # Prefer shorter titles (less likely to be compilations or unrelated content)
+            title_length = len(title)
+            if title_length < 100:
+                score += 20 * (1 - title_length / 100)
+
+            # Check for official/quality indicators
+            title_and_channel = (title + " " + video.get("channel", "")).lower()
+            if any(
+                word in title_and_channel for word in ["official", "vevo", "verified"]
+            ):
+                score += 10
+
+            # Penalize certain patterns that indicate wrong content
+            if any(
+                word in title_lower
+                for word in ["compilation", "playlist", "all episodes", "full series"]
+            ):
+                score -= 30
+
+            # Store score in video dict
+            video["_score"] = score
+            scored_videos.append(video)
+
+            if self.verbose:
+                logger.info(
+                    f"[VERBOSE] Candidate: {title[:60]}... (score: {score:.2f})"
+                )
+
+        # Return video with highest score
+        if scored_videos:
+            best = max(scored_videos, key=lambda v: v.get("_score", 0))
+            return best
 
         return None
 
