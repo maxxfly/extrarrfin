@@ -16,7 +16,72 @@
 - ⏰ **Schedule mode**: Automatic periodic downloads with configurable intervals
 - 🐳 **Docker support**: Run in a container with Alpine-based image
 
-## 📋 Prerequisites
+## � What Gets Downloaded?
+
+ExtrarrFin targets **Season 0 episodes** (special episodes) from your Sonarr library based on specific criteria:
+
+### Selection Criteria
+
+An episode will be downloaded if **ALL** of the following conditions are met:
+
+1. **✅ Series is monitored** in Sonarr
+   - The series must have its "Monitored" flag enabled
+
+2. **✅ Episode is monitored** in Season 0
+   - Individual episodes must be marked as monitored
+   - The entire season doesn't need to be monitored - only the specific episodes you want
+   - This allows fine-grained control: you can monitor only specific specials
+
+3. **✅ Episode has no file**
+   - The episode must not already have a file in Sonarr
+   - Use `--force` flag to re-download existing files if needed
+
+### What is Season 0?
+
+Season 0 (also called "Specials") typically includes:
+- 🎬 **Behind-the-scenes** footage
+- 🎤 **Interviews** with cast and crew
+- 🎭 **Deleted scenes** and outtakes
+- 📺 **Pilot episodes** and unaired pilots
+- 🎉 **Holiday specials** and crossover episodes
+- 🎥 **Featurettes** and making-of documentaries
+- 📰 **Recap episodes** and previews
+
+### YouTube Search Strategy
+
+For each missing episode, ExtrarrFin searches YouTube using:
+
+1. **First attempt**: `"Series Name" + "Episode Title"`
+   - Example: "Breaking Bad Behind the Scenes"
+
+2. **Fallback**: `"Episode Title"` only
+   - Used if the first search returns no results
+   - Example: "Behind the Scenes"
+
+### Download Process
+
+For each matched episode:
+1. ⬇️ Downloads video from YouTube (best quality MP4)
+2. 📝 Downloads subtitles (configurable languages)
+3. 🎬 Converts subtitles to SRT format
+4. 💾 Saves as: `Series Name - S00E01 - Episode Title.mp4`
+5. 📁 Places in `/path/to/series/Specials/` folder
+6. 🔄 Triggers Sonarr rescan (unless `--no-scan` flag is used)
+
+### Example Workflow
+
+```
+Monitored series in Sonarr: "Breaking Bad"
+├─ Season 0 (Specials)
+│  ├─ S00E01 "Pilot" ..................... [monitored, no file] → ✅ Will download
+│  ├─ S00E02 "Inside Breaking Bad" ....... [monitored, no file] → ✅ Will download
+│  ├─ S00E03 "Making of Season 1" ........ [NOT monitored] ...... → ❌ Will skip
+│  └─ S00E04 "Deleted Scenes" ............ [monitored, has file] → ❌ Will skip (already exists)
+```
+
+**Result**: Only episodes S00E01 and S00E02 will be downloaded.
+
+## �📋 Prerequisites
 
 - Python 3.8+
 - An operational Sonarr instance
@@ -97,15 +162,35 @@ log_level: "INFO"
 schedule_enabled: false
 schedule_interval: 6
 schedule_unit: "hours"  # seconds, minutes, hours, days, weeks
+
+# Subtitle configuration (optional)
+subtitle_languages:
+  - "fr"
+  - "en"
+  - "fr-FR"
+  - "en-US"
+  - "en-GB"
+download_all_subtitles: false
 ```
 
 ### Option 2: Environment variables
+
+You can also use a `.env` file (copy from `.env.example`):
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Or export variables directly:
 
 ```bash
 export SONARR_URL="http://localhost:8989"
 export SONARR_API_KEY="your_api_key_here"
 export MEDIA_DIRECTORY="/mnt/media/TV Shows"
 export SONARR_DIRECTORY="/tv"
+export SUBTITLE_LANGUAGES="fr,en,es"
+export DOWNLOAD_ALL_SUBTITLES="false"
 ```
 
 ### Option 3: Command-line arguments
@@ -260,7 +345,82 @@ Downloaded files are organized according to Jellyfin format:
 
 Naming format: `{SeriesName} - S{Season:02d}E{Episode:02d} - {EpisodeTitle}.{ext}`
 
-## 🔧 Directory mapping
+## � Subtitle Management
+
+ExtrarrFin automatically downloads and manages subtitles from YouTube videos:
+
+### Features
+
+- **Auto-download**: Subtitles are automatically downloaded when available
+- **Multiple languages**: Configure priority languages (default: French and English)
+- **Smart fallback**: Uses manual subtitles first, then auto-generated if needed
+- **Format conversion**: All subtitles are converted to SRT format for maximum compatibility
+- **Embedded + External**: Subtitles are both embedded in the video file and saved as separate .srt files
+
+### Configuration
+
+```yaml
+# Download specific languages (in priority order)
+subtitle_languages:
+  - "fr"          # French
+  - "en"          # English
+  - "fr-FR"       # French (France)
+  - "en-US"       # English (US)
+  - "en-GB"       # English (UK)
+  - "de"          # German
+  - "es"          # Spanish
+  - "it"          # Italian
+  - "pt"          # Portuguese
+
+# Or download ALL available subtitles
+download_all_subtitles: false  # Set to true to download all
+```
+
+### How it works
+
+1. **Priority mode** (default): Downloads only specified languages
+   - Tries manual subtitles first
+   - Falls back to auto-generated if manual not available
+   - Downloads in the order specified in `subtitle_languages`
+
+2. **All subtitles mode**: When `download_all_subtitles: true`
+   - Downloads every available subtitle language
+   - Useful for international content
+   - May result in larger storage usage
+
+### Language codes
+
+Use ISO 639-1 codes or with regional variants:
+- Simple: `fr`, `en`, `de`, `es`, `it`, `pt`, `ja`, `ko`, `zh`
+- Regional: `en-US`, `en-GB`, `fr-FR`, `fr-CA`, `es-ES`, `es-MX`, `pt-BR`, `pt-PT`
+
+### Examples
+
+**For French content with English fallback:**
+```yaml
+subtitle_languages: ["fr", "fr-FR", "en"]
+```
+
+**For international viewing:**
+```yaml
+download_all_subtitles: true
+```
+
+**For specific multi-language setup:**
+```yaml
+subtitle_languages: ["fr", "en", "es", "de", "it"]
+download_all_subtitles: false
+```
+
+### Output
+
+Subtitles are saved both:
+- **Embedded**: Inside the video file (for apps that support it)
+- **External**: As separate `.srt` files (e.g., `Series - S00E01.fr.srt`, `Series - S00E01.en.srt`)
+
+This ensures maximum compatibility with Jellyfin, Plex, and other media servers.
+
+## �🔧 Directory mapping
 
 If you're running the script on a different machine than Sonarr, you need to configure mapping:
 
@@ -428,6 +588,9 @@ services:
       - SONARR_API_KEY=your_api_key_here
       - MEDIA_DIRECTORY=/media
       - SONARR_DIRECTORY=/media
+      # Subtitle configuration (optional)
+      - SUBTITLE_LANGUAGES=fr,en,fr-FR,en-US,en-GB
+      - DOWNLOAD_ALL_SUBTITLES=false
     command: ["--config", "/config/config.yaml", "schedule-mode"]
     networks:
       - media
@@ -460,9 +623,19 @@ docker run --rm \
   -e SONARR_URL=http://sonarr:8989 \
   -e SONARR_API_KEY=your_key \
   -e MEDIA_DIRECTORY=/media \
+  -e SUBTITLE_LANGUAGES=fr,en,es \
+  -e DOWNLOAD_ALL_SUBTITLES=false \
   -v /path/to/media:/media \
   jeanmary/extrarrfin:latest download
 ```
+
+Available environment variables:
+- `SONARR_URL`: Sonarr instance URL
+- `SONARR_API_KEY`: Sonarr API key
+- `MEDIA_DIRECTORY`: Path to media directory
+- `SONARR_DIRECTORY`: Sonarr root directory path
+- `SUBTITLE_LANGUAGES`: Comma-separated language codes (e.g., `fr,en,de,es`)
+- `DOWNLOAD_ALL_SUBTITLES`: Set to `true` to download all available subtitles
 
 ### Docker with existing Sonarr network
 

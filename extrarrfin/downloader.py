@@ -3,7 +3,6 @@ Download module via yt-dlp with Jellyfin formatting
 """
 
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Tuple
@@ -21,8 +20,18 @@ class Downloader:
     def __init__(
         self,
         format_string: str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        subtitle_languages: list[str] | None = None,
+        download_all_subtitles: bool = False,
     ):
         self.format_string = format_string
+        self.subtitle_languages = subtitle_languages or [
+            "fr",
+            "en",
+            "fr-FR",
+            "en-US",
+            "en-GB",
+        ]
+        self.download_all_subtitles = download_all_subtitles
 
     def sanitize_filename(self, filename: str) -> str:
         """Clean a filename to make it compatible"""
@@ -170,15 +179,22 @@ class Downloader:
             "outtmpl": output_template,
             "quiet": False,
             "no_warnings": False,
-            "writesubtitles": True,
-            "writeautomaticsub": True,
-            "subtitleslangs": ["fr", "en"],
-            "ignoreerrors": True,  # Ignore subtitle download errors
+            # Subtitle options - improved
+            "writesubtitles": True,  # Download manual subtitles
+            "writeautomaticsub": True,  # Download auto-generated subtitles as fallback
+            "subtitleslangs": self.subtitle_languages,  # Configurable priority languages
+            "allsubtitles": self.download_all_subtitles,  # Download all available subtitles if enabled
+            "subtitlesformat": "srt",  # Convert to SRT format (best compatibility)
+            "ignoreerrors": True,  # Don't fail if subtitles can't be downloaded
             "postprocessors": [
+                {
+                    "key": "FFmpegSubtitlesConvertor",
+                    "format": "srt",  # Convert all subtitles to SRT
+                },
                 {
                     "key": "FFmpegEmbedSubtitle",
                     "already_have_subtitle": False,
-                }
+                },
             ],
         }
 

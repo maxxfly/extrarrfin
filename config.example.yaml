@@ -33,3 +33,16 @@ schedule_interval: 1
 
 # Schedule unit (seconds, minutes, hours, days, weeks)
 schedule_unit: "hours"
+
+# Subtitle configuration
+# Languages to download (in order of priority)
+# Use ISO 639-1 codes (fr, en, de, es, etc.) or with region (fr-FR, en-US, en-GB)
+subtitle_languages:
+  - "fr"
+  - "en"
+  - "fr-FR"
+  - "en-US"
+  - "en-GB"
+
+# Download all available subtitles (ignores subtitle_languages if true)
+download_all_subtitles: false

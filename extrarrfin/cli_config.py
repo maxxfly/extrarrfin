@@ -24,7 +24,7 @@ def load_config_from_args(
 ) -> Config:
     """
     Load configuration from CLI arguments and files
-    
+
     Args:
         config_file: Path to config file
         sonarr_url: Sonarr URL from CLI
@@ -32,10 +32,10 @@ def load_config_from_args(
         media_dir: Media directory from CLI
         sonarr_dir: Sonarr directory from CLI
         log_level: Log level
-        
+
     Returns:
         Config object
-        
+
     Raises:
         SystemExit if configuration is invalid
     """
@@ -70,20 +70,20 @@ def load_config_from_args(
     except Exception as e:
         console.print(f"[red]Configuration error:[/red] {e}")
         sys.exit(1)
-    
+
     return cfg
 
 
 def validate_sonarr_connection(config: Config) -> SonarrClient:
     """
     Validate Sonarr connection and return client
-    
+
     Args:
         config: Configuration object
-        
+
     Returns:
         SonarrClient instance
-        
+
     Raises:
         SystemExit if connection fails
     """
@@ -107,16 +107,20 @@ def setup_context(
 ) -> dict:
     """
     Setup CLI context with config, sonarr client and downloader
-    
+
     Args:
         config: Configuration object
         sonarr_client: SonarrClient instance
-        
+
     Returns:
         Dictionary with context objects
     """
     return {
         "config": config,
         "sonarr": sonarr_client,
-        "downloader": Downloader(config.yt_dlp_format),
+        "downloader": Downloader(
+            config.yt_dlp_format,
+            subtitle_languages=config.subtitle_languages,
+            download_all_subtitles=config.download_all_subtitles,
+        ),
     }

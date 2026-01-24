@@ -23,6 +23,11 @@ class Config:
     schedule_enabled: bool = False
     schedule_interval: int = 1
     schedule_unit: str = "hours"
+    # Subtitle options
+    subtitle_languages: list = field(
+        default_factory=lambda: ["fr", "en", "fr-FR", "en-US", "en-GB"]
+    )
+    download_all_subtitles: bool = False
 
     @classmethod
     def from_file(cls, config_path: Path) -> "Config":
@@ -55,6 +60,22 @@ class Config:
         if os.getenv("SONARR_DIRECTORY"):
             config_data["sonarr_directory"] = os.getenv("SONARR_DIRECTORY")
 
+        # Subtitle configuration from environment
+        subtitle_langs_env = os.getenv("SUBTITLE_LANGUAGES")
+        if subtitle_langs_env:
+            # Parse comma-separated list of languages
+            config_data["subtitle_languages"] = [
+                lang.strip() for lang in subtitle_langs_env.split(",")
+            ]
+
+        download_all_subs_env = os.getenv("DOWNLOAD_ALL_SUBTITLES")
+        if download_all_subs_env:
+            config_data["download_all_subtitles"] = download_all_subs_env.lower() in [
+                "true",
+                "1",
+                "yes",
+            ]
+
         if "sonarr_url" not in config_data or "sonarr_api_key" not in config_data:
             raise ValueError(
                 "Incomplete configuration. Sonarr URL and API Key are required. "
@@ -70,10 +91,14 @@ class Config:
             "sonarr_api_key": self.sonarr_api_key,
             "media_directory": self.media_directory,
             "sonarr_directory": self.sonarr_directory,
-            "youtube_search_suffix": self.youtube_search_suffix,
             "yt_dlp_format": self.yt_dlp_format,
             "max_results": self.max_results,
             "log_level": self.log_level,
+            "schedule_enabled": self.schedule_enabled,
+            "schedule_interval": self.schedule_interval,
+            "schedule_unit": self.schedule_unit,
+            "subtitle_languages": self.subtitle_languages,
+            "download_all_subtitles": self.download_all_subtitles,
         }
 
         with open(config_path, "w", encoding="utf-8") as f:

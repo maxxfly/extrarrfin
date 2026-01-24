@@ -16,6 +16,11 @@ services:
       - SONARR_API_KEY=${SONARR_API_KEY}
       - MEDIA_DIRECTORY=/media
       - SONARR_DIRECTORY=/media
+      # Subtitle configuration (optional)
+      # Comma-separated list of language codes
+      - SUBTITLE_LANGUAGES=${SUBTITLE_LANGUAGES:-fr,en,fr-FR,en-US,en-GB}
+      # Set to 'true' to download all available subtitles
+      - DOWNLOAD_ALL_SUBTITLES=${DOWNLOAD_ALL_SUBTITLES:-false}
     # Command to run schedule mode
     command: ["--config", "/config/config.yaml", "schedule-mode"]
     # Alternatively, run download once:
