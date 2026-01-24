@@ -239,22 +239,15 @@ python extrarrfin.py list --limit 42
 
 **Example output:**
 ```
-Series with Monitored Season 0 (3)
-┏━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━┓
-┃ ID ┃ Title         ┃ Path           ┃ Downloaded ┃ Missing ┃ Subtitles    ┃
-┡━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━┩
-│ 42 │ Breaking Bad  │ /media/...     │ 5          │ 2       │ 10 (en, fr)  │
-│ 43 │ The Office    │ /media/...     │ 3          │ 0       │ 6 (en)       │
-└────┴───────────────┴────────────────┴────────────┴─────────┴──────────────┘
+Series with Monitored Season 0 (2)
+┏━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━┓
+┃ ID ┃ Title         ┃ Path                        ┃ Downloaded ┃ Missing ┃ Subtitles  ┃ Size   ┃
+┡━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━┩
+│ 42 │ Breaking Bad  │ /media/TV Shows/Breaking... │ 5          │ 2       │ 5 en, 5 fr │ 2.4 GB │
+│ 43 │ The Office    │ /media/TV Shows/The Offi... │ 3          │ 1       │ 3 en       │ 856 MB │
+└────┴───────────────┴─────────────────────────────┴────────────┴─────────┴────────────┴────────┘
 
-Downloaded episodes:
-  Breaking Bad (ID: 42)
-    ✓ S00E01 - Pilot (STRM) • 2 srt (en, fr)
-    ✓ S00E02 - Behind the Scenes (Video) • 2 srt (en, fr)
-    
-Missing episodes:
-  Breaking Bad (ID: 42)
-    • S00E03 - Deleted Scenes
+Total size: 3.26 GB
 ```
 
 #### `download` - Download episodes
@@ -266,16 +259,75 @@ python extrarrfin.py download --dry-run
 # Download all missing episodes
 python extrarrfin.py download
 
-# Limit to a specific series
+# Limit to a specific series (by name or ID)
 python extrarrfin.py download --limit "Breaking Bad"
+python extrarrfin.py download --limit 42
+
+# Target a specific episode number (requires --limit)
+python extrarrfin.py download --limit "Breaking Bad" --episode 5
 
 # Force re-download even if files exist
 # This will delete and replace existing files
-# Useful when switching between normal and STRM modes
-python extrarrfin.py download --force
+python extrarrfin.py download --force --limit "Series Name"
 
 # Don't trigger Sonarr scan after download
 python extrarrfin.py download --no-scan
+
+# Verbose mode - show detailed search and download info
+python extrarrfin.py download --verbose
+
+# Combine options
+python extrarrfin.py download --limit "Series" --episode 3 --force --verbose --dry-run
+```
+
+**Example output:**
+```
+Processing: Breaking Bad
+
+  Directory: /media/TV Shows/Breaking Bad/Specials
+  
+  Downloading: Breaking Bad - S00E01 - Pilot
+    Search query: 'Breaking Bad Pilot'
+    ✓ Downloaded: /media/TV Shows/Breaking Bad/Specials/Breaking Bad - S00E01 - Pilot.mp4
+    
+  Downloading: Breaking Bad - S00E02 - Inside Breaking Bad
+    Search query: 'Breaking Bad Inside Breaking Bad'
+    ✓ Downloaded: /media/TV Shows/Breaking Bad/Specials/Breaking Bad - S00E02 - Inside Breaking Bad.mp4
+    
+  Scanning Sonarr...
+    ✓ Scan triggered
+
+Summary:
+  Total: 2
+  Success: 2
+  Failed: 0
+```
+
+**Verbose mode output:**
+```
+Processing: Breaking Bad
+
+  Directory: /media/TV Shows/Breaking Bad/Specials
+  
+  Downloading: Breaking Bad - S00E01 - Pilot
+    Search query: 'Breaking Bad Pilot'
+    [VERBOSE] Series network: AMC
+    [VERBOSE] YouTube search query: 'Breaking Bad Pilot'
+    [VERBOSE] Full search URL: ytsearch5:Breaking Bad Pilot
+    [VERBOSE] Candidate: Breaking Bad: Pilot - Full Episode... (score: 125.50)
+    [VERBOSE] Network match bonus: AMC ~ AMC
+    [VERBOSE] Candidate: Breaking Bad Pilot Scene... (score: 75.20)
+    [VERBOSE] Candidate: Pilot Episode Review... (score: 45.10)
+    [VERBOSE] Video found: Breaking Bad: Pilot - Full Episode
+    [VERBOSE] Video URL: https://www.youtube.com/watch?v=...
+    [VERBOSE] Match score: 125.50
+    [VERBOSE] Starting download from: https://www.youtube.com/watch?v=...
+    [VERBOSE] Output template: /media/.../Breaking Bad - S00E01 - Pilot.%(ext)s
+    [VERBOSE] Format: bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best
+    [VERBOSE] Subtitle languages: fr, en, fr-FR, en-US, en-GB
+    [VERBOSE] Download successful: /media/.../Breaking Bad - S00E01 - Pilot.mp4
+    [VERBOSE] File size: 1024.56 MB
+    ✓ Downloaded: /media/TV Shows/Breaking Bad/Specials/Breaking Bad - S00E01 - Pilot.mp4
 ```
 
 #### `scan` - Manual scan
@@ -283,6 +335,15 @@ python extrarrfin.py download --no-scan
 ```bash
 # Trigger a manual scan for a series
 python extrarrfin.py scan 42
+
+# Dry-run mode (simulate without scanning)
+python extrarrfin.py scan 42 --dry-run
+```
+
+**Example output:**
+```
+Triggering scan for series ID 42...
+✓ Scan triggered successfully
 ```
 
 #### `schedule-mode` - Automatic periodic downloads
@@ -297,6 +358,9 @@ python extrarrfin.py schedule-mode --interval 30 --unit minutes
 # With other options
 python extrarrfin.py schedule-mode --interval 6 --unit hours --limit "Series Name"
 
+# With episode targeting and verbose mode
+python extrarrfin.py schedule-mode --limit "Series" --episode 5 --verbose
+
 # Dry-run mode for testing
 python extrarrfin.py schedule-mode --dry-run --interval 5 --unit minutes
 ```
@@ -306,6 +370,29 @@ Schedule mode will:
 - Execute downloads at the specified interval
 - Continue running until stopped with Ctrl+C
 - Display clear information about each execution and next run
+
+**Example output:**
+```
+ExtrarrFin - Schedule Mode
+Running downloads every 6 hours
+Press Ctrl+C to stop
+
+Running initial download...
+
+============================================================
+Running scheduled download at 2026-01-24 10:00:00
+============================================================
+
+Processing: Breaking Bad
+  ...
+  
+Summary:
+  Total: 2
+  Success: 2
+  Failed: 0
+
+Next run in 6 hours
+```
 
 ### Global options
 
