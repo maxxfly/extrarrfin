@@ -28,6 +28,8 @@ class Config:
         default_factory=lambda: ["fr", "en", "fr-FR", "en-US", "en-GB"]
     )
     download_all_subtitles: bool = False
+    # STRM file option
+    use_strm_files: bool = False
 
     @classmethod
     def from_file(cls, config_path: Path) -> "Config":
@@ -99,6 +101,7 @@ class Config:
             "schedule_unit": self.schedule_unit,
             "subtitle_languages": self.subtitle_languages,
             "download_all_subtitles": self.download_all_subtitles,
+            "use_strm_files": self.use_strm_files,
         }
 
         with open(config_path, "w", encoding="utf-8") as f:

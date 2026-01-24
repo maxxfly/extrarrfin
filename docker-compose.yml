@@ -21,6 +21,9 @@ services:
       - SUBTITLE_LANGUAGES=${SUBTITLE_LANGUAGES:-fr,en,fr-FR,en-US,en-GB}
       # Set to 'true' to download all available subtitles
       - DOWNLOAD_ALL_SUBTITLES=${DOWNLOAD_ALL_SUBTITLES:-false}
+      # STRM file mode: create .strm files instead of downloading videos
+      # Set to 'true' to enable streaming mode (saves disk space)
+      - USE_STRM_FILES=${USE_STRM_FILES:-false}
     # Command to run schedule mode
     command: ["--config", "/config/config.yaml", "schedule-mode"]
     # Alternatively, run download once:

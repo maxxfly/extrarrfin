@@ -46,3 +46,9 @@ subtitle_languages:
 
 # Download all available subtitles (ignores subtitle_languages if true)
 download_all_subtitles: false
+
+# STRM file mode (optional)
+# If enabled, creates .strm files pointing to YouTube URLs instead of downloading videos
+# Useful for saving disk space - media servers will stream directly from YouTube
+# Note: Requires internet connection for playback and may not work with all media servers
+use_strm_files: false

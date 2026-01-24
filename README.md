@@ -15,6 +15,8 @@
 - 📂 **Directory mapping**: Support for remote execution with path mapping
 - ⏰ **Schedule mode**: Automatic periodic downloads with configurable intervals
 - 🐳 **Docker support**: Run in a container with Alpine-based image
+- 📝 **Subtitle management**: Automatic download and conversion to SRT format
+- 📺 **STRM mode**: Create streaming files instead of downloading (saves disk space)
 
 ## � What Gets Downloaded?
 
@@ -171,6 +173,10 @@ subtitle_languages:
   - "en-US"
   - "en-GB"
 download_all_subtitles: false
+
+# STRM file mode (optional)
+# Creates .strm files instead of downloading - saves disk space
+use_strm_files: false
 ```
 
 ### Option 2: Environment variables
@@ -191,6 +197,7 @@ export MEDIA_DIRECTORY="/mnt/media/TV Shows"
 export SONARR_DIRECTORY="/tv"
 export SUBTITLE_LANGUAGES="fr,en,es"
 export DOWNLOAD_ALL_SUBTITLES="false"
+export USE_STRM_FILES="false"
 ```
 
 ### Option 3: Command-line arguments
@@ -237,6 +244,8 @@ python extrarrfin.py download
 python extrarrfin.py download --limit "Breaking Bad"
 
 # Force re-download even if files exist
+# This will delete and replace existing files
+# Useful when switching between normal and STRM modes
 python extrarrfin.py download --force
 
 # Don't trigger Sonarr scan after download
@@ -420,7 +429,139 @@ Subtitles are saved both:
 
 This ensures maximum compatibility with Jellyfin, Plex, and other media servers.
 
-## �🔧 Directory mapping
+## 📺 STRM File Mode (Streaming Mode)
+
+ExtrarrFin can create **STRM files** instead of downloading videos, allowing your media server to stream directly from YouTube.
+
+### What are STRM files?
+
+STRM (Stream) files are simple text files containing a URL. When your media server encounters a `.strm` file, it streams the content from that URL instead of playing a local file.
+
+### Benefits
+
+✅ **Saves disk space**: No need to download large video files  
+✅ **Always up-to-date**: Content streamed directly from source  
+✅ **Faster setup**: Instant "download" - just creates small text files  
+✅ **Perfect for specials**: Ideal for one-time viewing content  
+✅ **Subtitles included**: External .srt files are downloaded alongside the .strm file
+
+### Limitations
+
+⚠️ **Requires internet**: Playback needs active internet connection  
+⚠️ **YouTube availability**: Content must remain available on YouTube  
+⚠️ **Media server support**: Not all media servers support STRM files equally  
+⚠️ **Quality depends on YouTube**: Can't control video quality as precisely
+
+### Configuration
+
+Enable STRM mode in your configuration:
+
+```yaml
+# Create .strm files instead of downloading videos
+use_strm_files: true
+```
+
+Or via environment variable:
+
+```bash
+export USE_STRM_FILES=true
+```
+
+Or with Docker:
+
+```bash
+docker run -e USE_STRM_FILES=true ...
+```
+
+### How it works
+
+When STRM mode is enabled:
+
+1. 🔍 ExtrarrFin searches YouTube for the episode
+2. 📝 Creates a `.strm` file containing the YouTube URL
+3. � Downloads subtitles as separate `.srt` files (configurable languages)
+4. 💾 Saves as: `Series Name - S00E01 - Episode Title.strm` (+ `.fr.srt`, `.en.srt`, etc.)
+5. 📁 Places in `/path/to/series/Specials/` folder
+6. 🔄 Triggers Sonarr rescan
+
+### Example
+
+**Normal mode** (downloads video):
+```
+Breaking Bad/Specials/
+└── Breaking Bad - S00E01 - Pilot.mp4  (1.2 GB)
+```
+
+**STRM mode** (creates link + subtitles):
+```
+Breaking Bad/Specials/
+├── Breaking Bad - S00E01 - Pilot.strm  (50 bytes)
+├── Breaking Bad - S00E01 - Pilot.fr.srt  (25 KB)
+└── Breaking Bad - S00E01 - Pilot.en.srt  (23 KB)
+```
+
+Content of `.strm` file:
+```
+https://www.youtube.com/watch?v=dQw4w9WgXcQ
+```
+
+### Media Server Compatibility
+
+| Media Server | STRM Support | Notes |
+|-------------|--------------|-------|
+| **Jellyfin** | ✅ Excellent | Full support, works great |
+| **Plex** | ⚠️ Limited | Requires Plex Pass, may be unstable |
+| **Emby** | ✅ Good | Supported with some limitations |
+| **Kodi** | ✅ Excellent | Native support |
+
+### When to use STRM mode?
+
+**Good use cases:**
+- 📦 Limited disk space
+- 🎬 One-time viewing specials (behind-the-scenes, interviews)
+- 🧪 Testing before committing disk space
+- 📺 Content that changes frequently
+
+**Not recommended for:**
+- 📺 Main series episodes you want to keep
+- 🚫 Areas with unreliable internet
+- 🎯 Content requiring specific quality/subtitles
+- 💾 Long-term archiving
+
+### Mixed mode usage
+
+You can switch between modes at any time:
+
+```bash
+# Download some series normally
+python extrarrfin.py download --limit "Series A"
+
+# Use STRM for others (edit config.yaml: use_strm_files: true)
+python extrarrfin.py download --limit "Series B"
+```
+
+### Switching between modes
+
+If you want to convert existing files from one mode to another, use the `--force` flag:
+
+```bash
+# Previously downloaded as MP4, now want STRM
+# 1. Enable STRM mode in config.yaml
+use_strm_files: true
+
+# 2. Force re-download (will delete old MP4 and create STRM + subtitles)
+python extrarrfin.py download --force --limit "Series Name"
+```
+
+**What happens with `--force`:**
+- ✅ Deletes existing video files (.mp4, .mkv, etc.)
+- ✅ Deletes existing .strm files
+- ✅ Keeps and regenerates subtitle files (.srt)
+- ✅ Creates the new file format based on current `use_strm_files` setting
+
+**Note:** Subtitle files are always refreshed to match your current `subtitle_languages` configuration.
+
+## 🔧 Directory mapping
 
 If you're running the script on a different machine than Sonarr, you need to configure mapping:
 
@@ -591,6 +732,8 @@ services:
       # Subtitle configuration (optional)
       - SUBTITLE_LANGUAGES=fr,en,fr-FR,en-US,en-GB
       - DOWNLOAD_ALL_SUBTITLES=false
+      # STRM file mode (optional) - set to true to stream instead of download
+      - USE_STRM_FILES=false
     command: ["--config", "/config/config.yaml", "schedule-mode"]
     networks:
       - media
@@ -625,6 +768,7 @@ docker run --rm \
   -e MEDIA_DIRECTORY=/media \
   -e SUBTITLE_LANGUAGES=fr,en,es \
   -e DOWNLOAD_ALL_SUBTITLES=false \
+  -e USE_STRM_FILES=false \
   -v /path/to/media:/media \
   jeanmary/extrarrfin:latest download
 ```
@@ -636,6 +780,7 @@ Available environment variables:
 - `SONARR_DIRECTORY`: Sonarr root directory path
 - `SUBTITLE_LANGUAGES`: Comma-separated language codes (e.g., `fr,en,de,es`)
 - `DOWNLOAD_ALL_SUBTITLES`: Set to `true` to download all available subtitles
+- `USE_STRM_FILES`: Set to `true` to create STRM files instead of downloading videos
 
 ### Docker with existing Sonarr network
 

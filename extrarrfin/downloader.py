@@ -22,6 +22,7 @@ class Downloader:
         format_string: str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         subtitle_languages: list[str] | None = None,
         download_all_subtitles: bool = False,
+        use_strm_files: bool = False,
     ):
         self.format_string = format_string
         self.subtitle_languages = subtitle_languages or [
@@ -32,6 +33,7 @@ class Downloader:
             "en-GB",
         ]
         self.download_all_subtitles = download_all_subtitles
+        self.use_strm_files = use_strm_files
 
     def sanitize_filename(self, filename: str) -> str:
         """Clean a filename to make it compatible"""
@@ -140,6 +142,88 @@ class Downloader:
 
         return None
 
+    def create_strm_file(
+        self,
+        series: Series,
+        episode: Episode,
+        output_directory: Path,
+        youtube_url: str,
+    ) -> Tuple[bool, str | None, str | None]:
+        """
+        Create a STRM file pointing to YouTube URL and download subtitles
+
+        Args:
+            series: Series object
+            episode: Episode object
+            output_directory: Directory to save the STRM file
+            youtube_url: YouTube URL to write in the STRM file
+
+        Returns:
+            Tuple (success, file_path, error_message)
+        """
+        try:
+            base_filename = self.build_jellyfin_filename(series, episode)
+            strm_file = output_directory / f"{base_filename}.strm"
+
+            # Write YouTube URL to STRM file
+            with open(strm_file, "w", encoding="utf-8") as f:
+                f.write(youtube_url)
+
+            logger.info(f"STRM file created: {strm_file}")
+
+            # Download subtitles separately (they will be placed next to the STRM file)
+            self._download_subtitles_only(youtube_url, output_directory, base_filename)
+
+            return True, str(strm_file), None
+
+        except Exception as e:
+            error_msg = f"Error creating STRM file: {str(e)}"
+            logger.error(error_msg)
+            return False, None, error_msg
+
+    def _download_subtitles_only(
+        self, youtube_url: str, output_directory: Path, base_filename: str
+    ):
+        """
+        Download only subtitles for a YouTube video
+
+        Args:
+            youtube_url: YouTube video URL
+            output_directory: Directory to save subtitles
+            base_filename: Base filename (without extension)
+        """
+        try:
+            output_template = str(output_directory / f"{base_filename}.%(ext)s")
+
+            ydl_opts = {
+                "skip_download": True,  # Don't download the video
+                "writesubtitles": True,
+                "writeautomaticsub": True,
+                "subtitleslangs": self.subtitle_languages,
+                "allsubtitles": self.download_all_subtitles,
+                "subtitlesformat": "srt",
+                "outtmpl": output_template,
+                "quiet": True,
+                "no_warnings": True,
+                "ignoreerrors": True,
+                "postprocessors": [
+                    {
+                        "key": "FFmpegSubtitlesConvertor",
+                        "format": "srt",
+                    },
+                ],
+            }
+
+            logger.info(f"Downloading subtitles for: {youtube_url}")
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.extract_info(youtube_url, download=True)
+
+            logger.info("Subtitles downloaded successfully")
+
+        except Exception as e:
+            # Don't fail the whole operation if subtitles fail
+            logger.warning(f"Could not download subtitles: {e}")
+
     def download_episode(
         self,
         series: Series,
@@ -159,9 +243,25 @@ class Downloader:
 
         # Check if file already exists
         existing_files = list(output_directory.glob(f"{base_filename}.*"))
-        if existing_files and not force:
-            logger.info(f"File already exists: {existing_files[0].name}")
-            return True, str(existing_files[0]), None
+        if existing_files:
+            if not force:
+                logger.info(f"File already exists: {existing_files[0].name}")
+                return True, str(existing_files[0]), None
+            else:
+                # Force mode: delete existing files to allow switching between modes
+                for existing_file in existing_files:
+                    try:
+                        # Don't delete .srt files if we're in STRM mode (we'll regenerate them)
+                        if existing_file.suffix == ".srt" and self.use_strm_files:
+                            continue
+                        # Don't delete .srt files if we're downloading (yt-dlp will handle them)
+                        if existing_file.suffix == ".srt" and not self.use_strm_files:
+                            continue
+
+                        logger.info(f"Deleting existing file: {existing_file.name}")
+                        existing_file.unlink()
+                    except Exception as e:
+                        logger.warning(f"Could not delete {existing_file.name}: {e}")
 
         # Search on YouTube if URL is not provided
         if not youtube_url:
@@ -170,6 +270,10 @@ class Downloader:
                 error_msg = "No video found on YouTube"
                 logger.warning(error_msg)
                 return False, None, error_msg
+
+        # If STRM mode is enabled, create STRM file instead of downloading
+        if self.use_strm_files:
+            return self.create_strm_file(series, episode, output_directory, youtube_url)
 
         # yt-dlp options
         output_template = str(output_directory / f"{base_filename}.%(ext)s")
