@@ -23,6 +23,7 @@ class Downloader:
         subtitle_languages: list[str] | None = None,
         download_all_subtitles: bool = False,
         use_strm_files: bool = False,
+        verbose: bool = False,
     ):
         self.format_string = format_string
         self.subtitle_languages = subtitle_languages or [
@@ -34,6 +35,7 @@ class Downloader:
         ]
         self.download_all_subtitles = download_all_subtitles
         self.use_strm_files = use_strm_files
+        self.verbose = verbose
 
     def sanitize_filename(self, filename: str) -> str:
         """Clean a filename to make it compatible"""
@@ -101,41 +103,66 @@ class Downloader:
             "no_warnings": True,
             "extract_flat": True,
             "default_search": "ytsearch1",
+            "sleep_requests": 1,  # Sleep 1 second between requests to avoid 429 errors
         }
 
         # First attempt: series title + episode title
         if episode.title and episode.title != "TBA":
             query_with_series = f"{series.title} {episode.title}"
-            logger.info(f"YouTube search (with series): {query_with_series}")
+            if self.verbose:
+                logger.info(f"[VERBOSE] YouTube search query: '{query_with_series}'")
+            else:
+                logger.info(f"YouTube search (with series): {query_with_series}")
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    result = ydl.extract_info(
-                        f"ytsearch1:{query_with_series}", download=False
-                    )
+                    search_url = f"ytsearch1:{query_with_series}"
+                    if self.verbose:
+                        logger.info(f"[VERBOSE] Full search URL: {search_url}")
+
+                    result = ydl.extract_info(search_url, download=False)
 
                     if result and "entries" in result and result["entries"]:
                         video = result["entries"][0]
                         video_url = f"https://www.youtube.com/watch?v={video['id']}"
-                        logger.info(f"Video found: {video.get('title')} - {video_url}")
+                        if self.verbose:
+                            logger.info(f"[VERBOSE] Video found: {video.get('title')}")
+                            logger.info(f"[VERBOSE] Video URL: {video_url}")
+                        else:
+                            logger.info(
+                                f"Video found: {video.get('title')} - {video_url}"
+                            )
                         return video_url
             except Exception as e:
                 logger.error(f"Error during YouTube search: {e}")
 
             # Second attempt: episode title only
             query_episode_only = episode.title
-            logger.info(f"YouTube search (episode only): {query_episode_only}")
+            if self.verbose:
+                logger.info(
+                    f"[VERBOSE] YouTube search query (episode only): '{query_episode_only}'"
+                )
+            else:
+                logger.info(f"YouTube search (episode only): {query_episode_only}")
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    result = ydl.extract_info(
-                        f"ytsearch1:{query_episode_only}", download=False
-                    )
+                    search_url = f"ytsearch1:{query_episode_only}"
+                    if self.verbose:
+                        logger.info(f"[VERBOSE] Full search URL: {search_url}")
+
+                    result = ydl.extract_info(search_url, download=False)
 
                     if result and "entries" in result and result["entries"]:
                         video = result["entries"][0]
                         video_url = f"https://www.youtube.com/watch?v={video['id']}"
-                        logger.info(f"Video found: {video.get('title')} - {video_url}")
+                        if self.verbose:
+                            logger.info(f"[VERBOSE] Video found: {video.get('title')}")
+                            logger.info(f"[VERBOSE] Video URL: {video_url}")
+                        else:
+                            logger.info(
+                                f"Video found: {video.get('title')} - {video_url}"
+                            )
                         return video_url
             except Exception as e:
                 logger.error(f"Error during YouTube search: {e}")
@@ -148,6 +175,7 @@ class Downloader:
         episode: Episode,
         output_directory: Path,
         youtube_url: str,
+        dry_run: bool = False,
     ) -> Tuple[bool, str | None, str | None]:
         """
         Create a STRM file pointing to direct video stream URL and download subtitles
@@ -157,6 +185,7 @@ class Downloader:
             episode: Episode object
             output_directory: Directory to save the STRM file
             youtube_url: YouTube URL to extract stream from
+            dry_run: If True, simulate without creating files
 
         Returns:
             Tuple (success, file_path, error_message)
@@ -170,6 +199,7 @@ class Downloader:
                 "format": self.format_string,
                 "quiet": True,
                 "no_warnings": True,
+                "sleep_requests": 1,  # Sleep 1 second between requests to avoid 429 errors
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -183,6 +213,10 @@ class Downloader:
                     stream_url = info["formats"][-1]["url"]
                 else:
                     return False, None, "Could not extract stream URL"
+
+            if dry_run:
+                logger.info(f"DRY RUN: Would create STRM file: {strm_file}")
+                return True, str(strm_file), None
 
             # Write direct stream URL to STRM file
             with open(strm_file, "w", encoding="utf-8") as f:
@@ -225,6 +259,8 @@ class Downloader:
                 "quiet": True,
                 "no_warnings": True,
                 "ignoreerrors": True,
+                "sleep_requests": 1,  # Sleep 1 second between requests to avoid 429 errors
+                "sleep_subtitles": 1,  # Sleep 1 second before downloading subtitles
                 "postprocessors": [
                     {
                         "key": "FFmpegSubtitlesConvertor",
@@ -250,9 +286,18 @@ class Downloader:
         output_directory: Path,
         force: bool = False,
         youtube_url: str | None = None,
+        dry_run: bool = False,
     ) -> Tuple[bool, str | None, str | None]:
         """
         Download an episode from YouTube
+
+        Args:
+            series: Series object
+            episode: Episode object
+            output_directory: Directory to save the file
+            force: If True, re-download even if file exists
+            youtube_url: Optional YouTube URL (will search if not provided)
+            dry_run: If True, simulate without downloading or deleting files
 
         Returns:
             Tuple (success, file_path, error_message)
@@ -262,25 +307,42 @@ class Downloader:
 
         # Check if file already exists
         existing_files = list(output_directory.glob(f"{base_filename}.*"))
-        if existing_files:
-            if not force:
-                logger.info(f"File already exists: {existing_files[0].name}")
-                return True, str(existing_files[0]), None
-            else:
-                # Force mode: delete existing files to allow switching between modes
-                for existing_file in existing_files:
-                    try:
-                        # Don't delete .srt files if we're in STRM mode (we'll regenerate them)
-                        if existing_file.suffix == ".srt" and self.use_strm_files:
-                            continue
-                        # Don't delete .srt files if we're downloading (yt-dlp will handle them)
-                        if existing_file.suffix == ".srt" and not self.use_strm_files:
-                            continue
 
+        # If dry-run and files exist, report and return early
+        if dry_run and existing_files:
+            if force:
+                logger.info(
+                    f"DRY RUN: Would delete and re-download: {existing_files[0].name}"
+                )
+            else:
+                logger.info(f"DRY RUN: File already exists: {existing_files[0].name}")
+            return True, str(existing_files[0]), None
+
+        # If not force mode and files exist, just return (file already present)
+        if existing_files and not force:
+            logger.info(f"File already exists: {existing_files[0].name}")
+            return True, str(existing_files[0]), None
+
+        # Force mode: delete existing files to allow switching between modes
+        if existing_files and force:
+            for existing_file in existing_files:
+                try:
+                    # Don't delete .srt files if we're in STRM mode (we'll regenerate them)
+                    if existing_file.suffix == ".srt" and self.use_strm_files:
+                        continue
+                    # Don't delete .srt files if we're downloading (yt-dlp will handle them)
+                    if existing_file.suffix == ".srt" and not self.use_strm_files:
+                        continue
+
+                    if dry_run:
+                        logger.info(
+                            f"DRY RUN: Would delete existing file: {existing_file.name}"
+                        )
+                    else:
                         logger.info(f"Deleting existing file: {existing_file.name}")
                         existing_file.unlink()
-                    except Exception as e:
-                        logger.warning(f"Could not delete {existing_file.name}: {e}")
+                except Exception as e:
+                    logger.warning(f"Could not delete {existing_file.name}: {e}")
 
         # Search on YouTube if URL is not provided
         if not youtube_url:
@@ -290,9 +352,17 @@ class Downloader:
                 logger.warning(error_msg)
                 return False, None, error_msg
 
+        # If dry-run mode, return success without downloading
+        if dry_run:
+            logger.info(f"DRY RUN: Would download from {youtube_url}")
+            output_template = f"{base_filename}.mp4"
+            return True, str(output_directory / output_template), None
+
         # If STRM mode is enabled, create STRM file instead of downloading
         if self.use_strm_files:
-            return self.create_strm_file(series, episode, output_directory, youtube_url)
+            return self.create_strm_file(
+                series, episode, output_directory, youtube_url, dry_run=dry_run
+            )
 
         # yt-dlp options
         output_template = str(output_directory / f"{base_filename}.%(ext)s")
@@ -302,6 +372,10 @@ class Downloader:
             "outtmpl": output_template,
             "quiet": False,
             "no_warnings": False,
+            # Sleep options to avoid 429 errors (Too Many Requests)
+            "sleep_interval": 2,  # Sleep 2 seconds between downloads
+            "sleep_requests": 1,  # Sleep 1 second between requests
+            "sleep_subtitles": 1,  # Sleep 1 second before downloading subtitles
             # Subtitle options - improved
             "writesubtitles": True,  # Download manual subtitles
             "writeautomaticsub": True,  # Download auto-generated subtitles as fallback
@@ -322,7 +396,16 @@ class Downloader:
         }
 
         try:
-            logger.info(f"Downloading from: {youtube_url}")
+            if self.verbose:
+                logger.info(f"[VERBOSE] Starting download from: {youtube_url}")
+                logger.info(f"[VERBOSE] Output template: {output_template}")
+                logger.info(f"[VERBOSE] Format: {self.format_string}")
+                logger.info(
+                    f"[VERBOSE] Subtitle languages: {', '.join(self.subtitle_languages)}"
+                )
+            else:
+                logger.info(f"Downloading from: {youtube_url}")
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(youtube_url, download=True)
 
@@ -331,7 +414,13 @@ class Downloader:
                 final_file = output_directory / f"{base_filename}.{ext}"
 
                 if final_file.exists():
-                    logger.info(f"Download successful: {final_file}")
+                    if self.verbose:
+                        logger.info(f"[VERBOSE] Download successful: {final_file}")
+                        logger.info(
+                            f"[VERBOSE] File size: {final_file.stat().st_size / (1024 * 1024):.2f} MB"
+                        )
+                    else:
+                        logger.info(f"Download successful: {final_file}")
                     return True, str(final_file), None
                 else:
                     error_msg = "Downloaded file not found"

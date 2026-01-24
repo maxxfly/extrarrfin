@@ -229,6 +229,9 @@ def list(ctx, limit):
 
 @cli.command()
 @click.option("--limit", "-l", help="Limit to specific series (name or ID)")
+@click.option(
+    "--episode", "-e", type=int, help="Target a specific episode number (S00Exx)"
+)
 @click.option("--dry-run", "-d", is_flag=True, help="Simulation mode (don't download)")
 @click.option(
     "--force",
@@ -241,13 +244,22 @@ def list(ctx, limit):
     is_flag=True,
     help="Don't trigger Sonarr scan after download",
 )
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Verbose mode (show detailed YouTube search and download info)",
+)
 @click.pass_context
-def download(ctx, limit, dry_run, force, no_scan):
+def download(ctx, limit, episode, dry_run, force, no_scan, verbose):
     """Download missing season 0 episodes"""
 
     config: Config = ctx.obj["config"]
     sonarr: SonarrClient = ctx.obj["sonarr"]
     downloader: Downloader = ctx.obj["downloader"]
+
+    # Enable verbose mode if requested
+    downloader.verbose = verbose
 
     try:
         # Fetch series
@@ -280,6 +292,28 @@ def download(ctx, limit, dry_run, force, no_scan):
             console.print("[yellow]No series found[/yellow]")
             return
 
+        # Validation: episode option requires limit
+        if episode is not None and not limit:
+            console.print(
+                "[red]Error:[/red] --episode requires --limit to specify a series"
+            )
+            console.print(
+                "[dim]Example: python extrarrfin.py download --limit 'Series Name' --episode 5[/dim]"
+            )
+            return
+
+        # Safety check: warn if force mode is used without limit
+        if force and not limit and not dry_run:
+            console.print(
+                f"\n[bold yellow]Warning:[/bold yellow] Force mode will re-download "
+                f"ALL episodes for {len(series_with_season0)} series!"
+            )
+            console.print("[dim]Tip: Use --limit to target a specific series[/dim]")
+
+            if not click.confirm("Do you want to continue?", default=False):
+                console.print("[yellow]Operation cancelled[/yellow]")
+                return
+
         # Process each series
         total_downloads = 0
         successful_downloads = 0
@@ -290,6 +324,13 @@ def download(ctx, limit, dry_run, force, no_scan):
 
             # Get episodes to process
             episodes = sonarr.get_season_zero_episodes(series.id)
+
+            # Filter by episode number if specified
+            if episode is not None:
+                episodes = [e for e in episodes if e.episode_number == episode]
+                if not episodes:
+                    console.print(f"  [yellow]Episode {episode} not found[/yellow]")
+                    continue
 
             # If force mode, process all monitored episodes; otherwise only missing ones
             if force:
@@ -327,11 +368,32 @@ def download(ctx, limit, dry_run, force, no_scan):
                 if dry_run:
                     console.print(f"  [yellow]DRY RUN:[/yellow] {ep_info}")
                     # Check if file exists
-                    if downloader.file_exists(series, episode, output_dir):
+                    file_info = downloader.get_episode_file_info(
+                        series, episode, output_dir
+                    )
+                    if file_info["has_video"] or file_info["has_strm"]:
                         console.print(f"    [dim]File already present[/dim]")
+                    else:
+                        console.print(
+                            f"    [dim]Would search and download from YouTube[/dim]"
+                        )
+
+                    # Show what would happen with force mode
+                    if force and (file_info["has_video"] or file_info["has_strm"]):
+                        console.print(
+                            f"    [dim]Would delete existing file and re-download[/dim]"
+                        )
+
+                    successful_downloads += 1
                     continue
 
                 console.print(f"  [blue]Downloading:[/blue] {ep_info}")
+
+                # Show verbose info if enabled
+                if verbose:
+                    console.print(
+                        f"    [dim]Search query: '{series.title} {episode.title}'[/dim]"
+                    )
 
                 # Download episode
                 success, file_path, error = downloader.download_episode(
@@ -339,6 +401,7 @@ def download(ctx, limit, dry_run, force, no_scan):
                     episode,
                     output_dir,
                     force=force,
+                    dry_run=dry_run,
                 )
 
                 if success:
@@ -374,16 +437,23 @@ def download(ctx, limit, dry_run, force, no_scan):
 
 @cli.command()
 @click.argument("series_id", type=int)
+@click.option("--dry-run", "-d", is_flag=True, help="Simulation mode (don't scan)")
 @click.pass_context
-def scan(ctx, series_id):
+def scan(ctx, series_id, dry_run):
     """Trigger a manual scan of a series in Sonarr"""
 
     sonarr: SonarrClient = ctx.obj["sonarr"]
 
     try:
-        console.print(f"Triggering scan for series ID {series_id}...")
-        sonarr.rescan_series(series_id)
-        console.print("[green]✓ Scan triggered successfully[/green]")
+        if dry_run:
+            console.print(
+                f"[yellow]DRY RUN:[/yellow] Would trigger scan for series ID {series_id}"
+            )
+            console.print("[dim]No actual scan will be performed[/dim]")
+        else:
+            console.print(f"Triggering scan for series ID {series_id}...")
+            sonarr.rescan_series(series_id)
+            console.print("[green]✓ Scan triggered successfully[/green]")
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
@@ -420,6 +490,9 @@ def test(ctx):
 
 @cli.command()
 @click.option("--limit", "-l", help="Limit to specific series (name or ID)")
+@click.option(
+    "--episode", "-e", type=int, help="Target a specific episode number (S00Exx)"
+)
 @click.option("--dry-run", "-d", is_flag=True, help="Simulation mode (don't download)")
 @click.option(
     "--force",
@@ -433,6 +506,12 @@ def test(ctx):
     help="Don't trigger Sonarr scan after download",
 )
 @click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Verbose mode (show detailed YouTube search and download info)",
+)
+@click.option(
     "--interval",
     type=int,
     help="Override schedule interval from config",
@@ -443,7 +522,9 @@ def test(ctx):
     help="Override schedule unit from config",
 )
 @click.pass_context
-def schedule_mode(ctx, limit, dry_run, force, no_scan, interval, unit):
+def schedule_mode(
+    ctx, limit, episode, dry_run, force, no_scan, verbose, interval, unit
+):
     """Run downloads on a schedule"""
 
     config: Config = ctx.obj["config"]
@@ -474,7 +555,13 @@ def schedule_mode(ctx, limit, dry_run, force, no_scan, interval, unit):
 
             # Call the download command logic
             ctx.invoke(
-                download, limit=limit, dry_run=dry_run, force=force, no_scan=no_scan
+                download,
+                limit=limit,
+                episode=episode,
+                dry_run=dry_run,
+                force=force,
+                no_scan=no_scan,
+                verbose=verbose,
             )
 
             console.print(

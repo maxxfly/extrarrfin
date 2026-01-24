@@ -8,6 +8,7 @@ WORKDIR /app
 
 # Install system dependencies
 # ffmpeg is required for yt-dlp
+# curl and unzip are required for Deno installation
 RUN apk add --no-cache \
     ffmpeg \
     gcc \
@@ -16,7 +17,14 @@ RUN apk add --no-cache \
     libffi-dev \
     openssl-dev \
     cargo \
+    curl \
+    unzip \
     && rm -rf /var/cache/apk/*
+
+# Install Deno
+RUN curl -fsSL https://deno.land/install.sh | sh \
+    && mv /root/.deno/bin/deno /usr/local/bin/deno \
+    && deno --version
 
 # Copy requirements first for better layer caching
 COPY requirements.txt .
