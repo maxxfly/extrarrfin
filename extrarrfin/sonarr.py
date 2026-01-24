@@ -115,6 +115,17 @@ class SonarrClient:
                 return True
         return False
 
+    def has_monitored_season_zero_episodes(self, series: Series) -> bool:
+        """Check if series has monitored episodes in season 0"""
+        try:
+            episodes = self.get_season_zero_episodes(series.id)
+            return any(ep.monitored for ep in episodes)
+        except Exception as e:
+            logger.warning(
+                f"Error checking season 0 episodes for series {series.id}: {e}"
+            )
+            return False
+
     def rescan_series(self, series_id: int):
         """Trigger a series scan in Sonarr"""
         logger.info(f"Triggering scan for series ID {series_id}")

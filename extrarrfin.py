@@ -78,9 +78,9 @@ def list(ctx, limit):
             series_list = sonarr.get_monitored_series()
             progress.update(task, completed=True)
 
-        # Filter to keep only those with monitored season 0
+        # Filter to keep only those with monitored season 0 episodes
         series_with_season0 = [
-            s for s in series_list if sonarr.has_monitored_season_zero(s)
+            s for s in series_list if sonarr.has_monitored_season_zero_episodes(s)
         ]
 
         # Filter by name/ID if specified
@@ -169,9 +169,9 @@ def download(ctx, limit, dry_run, force, no_scan):
             series_list = sonarr.get_monitored_series()
             progress.update(task, completed=True)
 
-        # Filter to keep only those with monitored season 0
+        # Filter to keep only those with monitored season 0 episodes
         series_with_season0 = [
-            s for s in series_list if sonarr.has_monitored_season_zero(s)
+            s for s in series_list if sonarr.has_monitored_season_zero_episodes(s)
         ]
 
         # Filter by name/ID if specified
@@ -309,8 +309,10 @@ def test(ctx):
         monitored = [s for s in series if s.monitored]
         console.print(f"Monitored series: {len(monitored)}")
 
-        with_season0 = [s for s in monitored if sonarr.has_monitored_season_zero(s)]
-        console.print(f"With monitored season 0: {len(with_season0)}")
+        with_season0 = [
+            s for s in monitored if sonarr.has_monitored_season_zero_episodes(s)
+        ]
+        console.print(f"With monitored season 0 episodes: {len(with_season0)}")
 
     except Exception as e:
         console.print(f"[red]✗ Connection error:[/red] {e}")
