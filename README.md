@@ -476,7 +476,10 @@ STRM (Stream) files are simple text files containing a URL. When your media serv
 ⚠️ **Requires internet**: Playback needs active internet connection  
 ⚠️ **YouTube availability**: Content must remain available on YouTube  
 ⚠️ **Media server support**: Not all media servers support STRM files equally  
-⚠️ **Quality depends on YouTube**: Can't control video quality as precisely
+⚠️ **Quality depends on YouTube**: Can't control video quality as precisely  
+🔴 **URL expiration**: YouTube stream URLs expire after ~6 hours  
+🔴 **Requires periodic refresh**: Must re-run with `--force` flag every 6 hours to regenerate URLs  
+🔴 **IP-signed URLs**: Stream URLs are signed for the server's IP address - clients with different IPs cannot play the stream
 
 ### Configuration
 
@@ -553,6 +556,31 @@ https://www.youtube.com/watch?v=dQw4w9WgXcQ
 - 🚫 Areas with unreliable internet
 - 🎯 Content requiring specific quality/subtitles
 - 💾 Long-term archiving
+- ⏰ Content you watch repeatedly (URLs expire every ~6h)
+- 🌐 Remote users (URLs are IP-signed for server only)
+
+### Maintaining STRM files
+
+Since YouTube stream URLs expire after approximately 6 hours, you need to periodically refresh your STRM files:
+
+**Manual refresh:**
+```bash
+# Regenerate all STRM files with fresh URLs
+python extrarrfin.py download --force
+```
+
+**Automated refresh (recommended):**
+```bash
+# Add to crontab to refresh every 4 hours
+0 */4 * * * cd /path/to/extrarrfin && python extrarrfin.py download --no-scan
+```
+
+**Important notes:**
+- 🔄 The `--force` flag will overwrite existing STRM files with new URLs
+- ⏰ Refresh before URLs expire (recommended: every 4-5 hours)
+- 🌐 Stream URLs are IP-signed: only the server IP that generated the STRM can play it
+- ⚠️ **This means remote clients cannot stream** - STRM mode only works when streaming from the same server/IP
+- 📍 Consider downloading MP4 files instead if you have remote users
 
 ### Mixed mode usage
 

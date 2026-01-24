@@ -150,13 +150,13 @@ class Downloader:
         youtube_url: str,
     ) -> Tuple[bool, str | None, str | None]:
         """
-        Create a STRM file pointing to YouTube URL and download subtitles
+        Create a STRM file pointing to direct video stream URL and download subtitles
 
         Args:
             series: Series object
             episode: Episode object
             output_directory: Directory to save the STRM file
-            youtube_url: YouTube URL to write in the STRM file
+            youtube_url: YouTube URL to extract stream from
 
         Returns:
             Tuple (success, file_path, error_message)
@@ -165,9 +165,28 @@ class Downloader:
             base_filename = self.build_jellyfin_filename(series, episode)
             strm_file = output_directory / f"{base_filename}.strm"
 
-            # Write YouTube URL to STRM file
+            # Extract direct stream URL from YouTube
+            ydl_opts = {
+                "format": self.format_string,
+                "quiet": True,
+                "no_warnings": True,
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(youtube_url, download=False)
+
+                # Get the direct URL of the selected format
+                if "url" in info:
+                    stream_url = info["url"]
+                elif "formats" in info and info["formats"]:
+                    # Get the best format URL
+                    stream_url = info["formats"][-1]["url"]
+                else:
+                    return False, None, "Could not extract stream URL"
+
+            # Write direct stream URL to STRM file
             with open(strm_file, "w", encoding="utf-8") as f:
-                f.write(youtube_url)
+                f.write(stream_url)
 
             logger.info(f"STRM file created: {strm_file}")
 
