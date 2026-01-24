@@ -331,3 +331,76 @@ class Downloader:
         base_filename = self.build_jellyfin_filename(series, episode)
         existing_files = list(output_directory.glob(f"{base_filename}.*"))
         return len(existing_files) > 0
+
+    def get_episode_file_info(
+        self, series: Series, episode: Episode, output_directory: Path
+    ) -> dict:
+        """
+        Get detailed information about existing files for an episode
+
+        Returns:
+            Dictionary with file information:
+            {
+                'has_video': bool,
+                'has_strm': bool,
+                'video_file': str | None,
+                'strm_file': str | None,
+                'subtitles': {'fr': ['file1.fr.srt'], 'en': ['file2.en.srt']},
+                'subtitle_count': int
+            }
+        """
+        base_filename = self.build_jellyfin_filename(series, episode)
+
+        # Use pathlib to list all files in directory and filter manually
+        # This avoids glob pattern issues with special characters
+        try:
+            all_files = list(output_directory.iterdir())
+        except Exception:
+            all_files = []
+
+        # Filter files that start with our base_filename
+        existing_files = [
+            f
+            for f in all_files
+            if f.is_file() and f.name.startswith(base_filename + ".")
+        ]
+
+        info: dict = {
+            "has_video": False,
+            "has_strm": False,
+            "video_file": None,
+            "strm_file": None,
+            "subtitles": {},
+            "subtitle_count": 0,
+        }
+
+        video_extensions = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"}
+
+        for file in existing_files:
+            if file.suffix.lower() in video_extensions:
+                info["has_video"] = True
+                info["video_file"] = file.name
+            elif file.suffix.lower() == ".strm":
+                info["has_strm"] = True
+                info["strm_file"] = file.name
+            elif file.suffix.lower() == ".srt":
+                # Extract language code from filename
+                # Format: Series - S00E01 - Title.lang.srt or Series - S00E01 - Title.srt
+                # Remove base_filename and leading dot to get the remaining part
+                remaining = file.stem[len(base_filename) :]
+                if remaining.startswith("."):
+                    remaining = remaining[1:]
+
+                # If there's a remaining part, it's the language code
+                if remaining:
+                    lang = remaining.split(".")[0]  # Take first part if multiple dots
+                else:
+                    lang = "unknown"
+
+                subtitles_dict = info["subtitles"]
+                if lang not in subtitles_dict:
+                    subtitles_dict[lang] = []
+                subtitles_dict[lang].append(file.name)
+                info["subtitle_count"] = info["subtitle_count"] + 1
+
+        return info

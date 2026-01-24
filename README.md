@@ -220,6 +220,12 @@ Verifies that the connection to Sonarr is working correctly.
 
 #### `list` - List series and episodes
 
+Displays detailed information about your Season 0 episodes including:
+- 📊 Number of downloaded episodes
+- 📊 Number of missing episodes  
+- 📝 Subtitle count and languages (fr, en, etc.)
+- 🎬 File type indicators (Video/STRM)
+
 ```bash
 # List all series with monitored Season 0
 python extrarrfin.py list
@@ -229,6 +235,26 @@ python extrarrfin.py list --limit "Breaking Bad"
 
 # Limit to a specific series (by ID)
 python extrarrfin.py list --limit 42
+```
+
+**Example output:**
+```
+Series with Monitored Season 0 (3)
+┏━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━┓
+┃ ID ┃ Title         ┃ Path           ┃ Downloaded ┃ Missing ┃ Subtitles    ┃
+┡━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━┩
+│ 42 │ Breaking Bad  │ /media/...     │ 5          │ 2       │ 10 (en, fr)  │
+│ 43 │ The Office    │ /media/...     │ 3          │ 0       │ 6 (en)       │
+└────┴───────────────┴────────────────┴────────────┴─────────┴──────────────┘
+
+Downloaded episodes:
+  Breaking Bad (ID: 42)
+    ✓ S00E01 - Pilot (STRM) • 2 srt (en, fr)
+    ✓ S00E02 - Behind the Scenes (Video) • 2 srt (en, fr)
+    
+Missing episodes:
+  Breaking Bad (ID: 42)
+    • S00E03 - Deleted Scenes
 ```
 
 #### `download` - Download episodes
