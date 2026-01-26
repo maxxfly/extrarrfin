@@ -6,6 +6,7 @@ import logging
 
 import yt_dlp
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from extrarrfin.config import Config
 from extrarrfin.downloader import Downloader
@@ -17,6 +18,76 @@ console = Console()
 
 
 def download_tag_mode(
+    config: Config,
+    sonarr: SonarrClient,
+    downloader: Downloader,
+    limit: str = None,
+    dry_run: bool = False,
+    force: bool = False,
+    no_scan: bool = False,
+    verbose: bool = False,
+):
+    """
+    Download behind the scenes videos for series with want-extras tag
+
+    Args:
+        config: Configuration object
+        sonarr: Sonarr client
+        downloader: Downloader instance
+        limit: Optional series name or ID to limit downloads
+        dry_run: If True, don't actually download
+        force: If True, re-download even if file exists
+        no_scan: If True, don't trigger Sonarr scan
+        verbose: If True, show detailed info
+
+    Returns:
+        Tuple of (total_downloads, successful_downloads, failed_downloads)
+    """
+    total_downloads = 0
+    successful_downloads = 0
+    failed_downloads = 0
+
+    # Fetch series with tag
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Fetching tagged series...", total=None)
+        series_list = sonarr.get_monitored_series()
+        progress.update(task, completed=True)
+
+    # Filter for series with the "want-extras" tag
+    tagged_series = [s for s in series_list if sonarr.has_want_extras_tag(s)]
+
+    # Apply limit filter if specified
+    if limit:
+        if limit.isdigit():
+            tagged_series = [s for s in tagged_series if s.id == int(limit)]
+        else:
+            tagged_series = [
+                s for s in tagged_series if limit.lower() in s.title.lower()
+            ]
+
+    if not tagged_series:
+        console.print("[yellow]No series with 'want-extras' tag found[/yellow]")
+        return total_downloads, successful_downloads, failed_downloads
+
+    # Process each series
+    for series in tagged_series:
+        console.print(f"\n[bold cyan]Processing:[/bold cyan] {series.title}")
+
+        t, s, f = _download_series_extras(
+            series, config, sonarr, downloader, dry_run, force, no_scan, verbose
+        )
+        total_downloads += t
+        successful_downloads += s
+        failed_downloads += f
+
+    return total_downloads, successful_downloads, failed_downloads
+
+
+def _download_series_extras(
     series: Series,
     config: Config,
     sonarr: SonarrClient,
@@ -27,8 +98,8 @@ def download_tag_mode(
     verbose: bool = False,
 ):
     """
-    Download behind the scenes videos for a series with want-extras tag
-    
+    Download behind the scenes videos for a single series
+
     Args:
         series: The series to process
         config: Configuration object
@@ -38,7 +109,7 @@ def download_tag_mode(
         force: If True, re-download even if file exists
         no_scan: If True, don't trigger Sonarr scan
         verbose: If True, show detailed info
-    
+
     Returns:
         Tuple of (total_downloads, successful_downloads, failed_downloads)
     """
@@ -78,16 +149,12 @@ def download_tag_mode(
         # Check if file already exists
         existing_files = [f for f in output_dir.glob(f"{base_filename}.*")]
         if existing_files and not force:
-            console.print(
-                f"    [dim]{video_title} already exists, skipping[/dim]"
-            )
+            console.print(f"    [dim]{video_title} already exists, skipping[/dim]")
             successful_downloads += 1
             continue
 
         if dry_run:
-            console.print(
-                f"  [yellow]DRY RUN:[/yellow] Would download {video_title}"
-            )
+            console.print(f"  [yellow]DRY RUN:[/yellow] Would download {video_title}")
             successful_downloads += 1
             continue
 
@@ -129,32 +196,18 @@ def download_tag_mode(
             # Create .nfo file with video metadata
             nfo_path = output_dir / f"{base_filename}.nfo"
             with open(nfo_path, "w", encoding="utf-8") as nfo:
-                nfo.write(
-                    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-                )
+                nfo.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
                 nfo.write("<movie>\n")
                 nfo.write(f"  <title>{video_info['title']}</title>\n")
-                nfo.write(
-                    f"  <originaltitle>{video_info['title']}</originaltitle>\n"
-                )
-                nfo.write(
-                    f"  <plot>{video_info.get('description', '')}</plot>\n"
-                )
-                nfo.write(
-                    f"  <studio>{video_info.get('channel', '')}</studio>\n"
-                )
-                nfo.write(
-                    f"  <director>{video_info.get('uploader', '')}</director>\n"
-                )
+                nfo.write(f"  <originaltitle>{video_info['title']}</originaltitle>\n")
+                nfo.write(f"  <plot>{video_info.get('description', '')}</plot>\n")
+                nfo.write(f"  <studio>{video_info.get('channel', '')}</studio>\n")
+                nfo.write(f"  <director>{video_info.get('uploader', '')}</director>\n")
                 nfo.write(f"  <source>YouTube</source>\n")
                 nfo.write(f"  <id>{video_info['id']}</id>\n")
-                nfo.write(
-                    f"  <youtubeurl>{video_info['url']}</youtubeurl>\n"
-                )
+                nfo.write(f"  <youtubeurl>{video_info['url']}</youtubeurl>\n")
                 if video_info.get("duration"):
-                    nfo.write(
-                        f"  <runtime>{video_info['duration'] // 60}</runtime>\n"
-                    )
+                    nfo.write(f"  <runtime>{video_info['duration'] // 60}</runtime>\n")
                 nfo.write("</movie>\n")
 
             console.print(f"    [green]✓ Downloaded {video_title}[/green]")

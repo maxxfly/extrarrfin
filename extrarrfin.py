@@ -17,16 +17,17 @@ from extrarrfin.cli_config import (
     setup_context,
     validate_sonarr_connection,
 )
-from extrarrfin.config import Config
-from extrarrfin.downloader import Downloader
-from extrarrfin.sonarr import SonarrClient
-from extrarrfin.utils import format_episode_info, setup_logging
 from extrarrfin.commands import (
-    list_command,
-    download_tag_mode,
     download_season0_mode,
+    download_tag_mode,
+    list_command,
     test_command,
 )
+from extrarrfin.config import Config
+from extrarrfin.downloader import Downloader
+from extrarrfin.jellyfin import JellyfinClient
+from extrarrfin.sonarr import SonarrClient
+from extrarrfin.utils import format_episode_info, setup_logging
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -306,6 +307,13 @@ def list(ctx, limit):
     help="Verbose mode (show detailed YouTube search and download info)",
 )
 @click.option(
+    "--mode",
+    "-m",
+    type=click.Choice(["season0", "tag"]),
+    multiple=True,
+    help="Download mode: season0 (monitored Season 0 episodes) or tag (behind-the-scenes videos for tagged series). Can be specified multiple times.",
+)
+@click.option(
     "--jellyfin-url",
     envvar="JELLYFIN_URL",
     help="Jellyfin server URL (e.g., http://localhost:8096)",
@@ -316,7 +324,18 @@ def list(ctx, limit):
     help="Jellyfin API key for library refresh",
 )
 @click.pass_context
-def download(ctx, limit, episode, dry_run, force, no_scan, verbose, jellyfin_url, jellyfin_api_key):
+def download(
+    ctx,
+    limit,
+    episode,
+    dry_run,
+    force,
+    no_scan,
+    verbose,
+    mode,
+    jellyfin_url,
+    jellyfin_api_key,
+):
     """Download missing season 0 episodes"""
 
     config: Config = ctx.obj["config"]
@@ -326,174 +345,81 @@ def download(ctx, limit, episode, dry_run, force, no_scan, verbose, jellyfin_url
     # Enable verbose mode if requested
     downloader.verbose = verbose
 
+    # Determine which modes to run
+    # Use mode from CLI if provided, otherwise use config, otherwise default to season0
+    modes = [*mode] if mode else (
+        [*config.mode] if isinstance(config.mode, tuple) else 
+        [config.mode] if config.mode else 
+        ["season0"]
+    )
+
     try:
-        # Fetch series
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Fetching series...", total=None)
-            series_list = sonarr.get_monitored_series()
-            progress.update(task, completed=True)
-
-        # Filter to keep only those with monitored season 0 episodes
-        series_with_season0 = [
-            s for s in series_list if sonarr.has_monitored_season_zero_episodes(s)
-        ]
-
-        # Filter by name/ID if specified
-        if limit:
-            if limit.isdigit():
-                series_with_season0 = [
-                    s for s in series_with_season0 if s.id == int(limit)
-                ]
-            else:
-                series_with_season0 = [
-                    s for s in series_with_season0 if limit.lower() in s.title.lower()
-                ]
-
-        if not series_with_season0:
-            console.print("[yellow]No series found[/yellow]")
-            return
-
-        # Validation: episode option requires limit
-        if episode is not None and not limit:
-            console.print(
-                "[red]Error:[/red] --episode requires --limit to specify a series"
-            )
-            console.print(
-                "[dim]Example: python extrarrfin.py download --limit 'Series Name' --episode 5[/dim]"
-            )
-            return
-
-        # Process each series
         total_downloads = 0
         successful_downloads = 0
         failed_downloads = 0
 
-        for series in series_with_season0:
-            console.print(f"\n[bold cyan]Processing:[/bold cyan] {series.title}")
-
-            # Get episodes to process
-            episodes = sonarr.get_season_zero_episodes(series.id)
-
-            # Filter by episode number if specified
-            if episode is not None:
-                episodes = [e for e in episodes if e.episode_number == episode]
-                if not episodes:
-                    console.print(f"  [yellow]Episode {episode} not found[/yellow]")
-                    continue
-
-            # If force mode, process all monitored episodes; otherwise only missing ones
-            if force:
-                to_process = [e for e in episodes if e.monitored]
-            else:
-                to_process = [e for e in episodes if e.monitored and not e.has_file]
-
-            if not to_process:
-                if force:
-                    console.print("  [dim]No monitored episodes[/dim]")
-                else:
-                    console.print("  [dim]No missing episodes[/dim]")
-                continue
-
-            # Determine output directory
-            try:
-                output_dir = downloader.get_series_directory(
-                    series, config.media_directory, config.sonarr_directory
+        # Run each mode
+        for current_mode in modes:
+            if current_mode == "season0":
+                console.print("\n[bold magenta]Mode: Season 0[/bold magenta]")
+                total, success, failed = download_season0_mode(
+                    config,
+                    sonarr,
+                    downloader,
+                    limit,
+                    episode,
+                    dry_run,
+                    force,
+                    no_scan,
+                    verbose,
                 )
-                console.print(f"  [dim]Directory:[/dim] {output_dir}")
-            except Exception as e:
-                console.print(f"  [red]Error:[/red] {e}")
-                continue
+                total_downloads += total
+                successful_downloads += success
+                failed_downloads += failed
 
-            # Process each episode
-            for ep in to_process:
-                total_downloads += 1
-                ep_info = format_episode_info(
-                    series.title,
-                    ep.season_number,
-                    ep.episode_number,
-                    ep.title,
+            elif current_mode == "tag":
+                console.print("\n[bold magenta]Mode: Tag (Behind-the-Scenes)[/bold magenta]")
+                total, success, failed = download_tag_mode(
+                    config,
+                    sonarr,
+                    downloader,
+                    limit,
+                    dry_run,
+                    force,
+                    no_scan,
+                    verbose,
                 )
+                total_downloads += total
+                successful_downloads += success
+                failed_downloads += failed
 
-                if dry_run:
-                    console.print(f"  [yellow]DRY RUN:[/yellow] {ep_info}")
-                    # Check if file exists
-                    file_info = downloader.get_episode_file_info(series, ep, output_dir)
-                    if file_info["has_video"] or file_info["has_strm"]:
-                        console.print(f"    [dim]File already present[/dim]")
-                    else:
-                        console.print(
-                            f"    [dim]Would search and download from YouTube[/dim]"
-                        )
-
-                    # Show what would happen with force mode
-                    if force and (file_info["has_video"] or file_info["has_strm"]):
-                        console.print(
-                            f"    [dim]Would delete existing file and re-download[/dim]"
-                        )
-
-                    successful_downloads += 1
-                    continue
-
-                console.print(f"  [blue]Downloading:[/blue] {ep_info}")
-
-                # Show verbose info if enabled
-                if verbose:
-                    console.print(
-                        f"    [dim]Search query: '{series.title} {ep.title}'[/dim]"
-                    )
-
-                # Download episode
-                success, file_path, error = downloader.download_episode(
-                    series,
-                    ep,
-                    output_dir,
-                    force=force,
-                    dry_run=dry_run,
-                )
-
-                if success:
-                    successful_downloads += 1
-                    console.print(f"    [green]✓ Downloaded:[/green] {file_path}")
-                else:
-                    failed_downloads += 1
-                    console.print(f"    [red]✗ Failed:[/red] {error}")
-
-            # Trigger Sonarr scan if requested and if some downloads succeeded
-            if not dry_run and not no_scan and successful_downloads > 0:
-                try:
-                    console.print(f"  [blue]Scanning Sonarr...[/blue]")
-                    sonarr.rescan_series(series.id)
-                    console.print(f"    [green]✓ Scan triggered[/green]")
-                except Exception as e:
-                    console.print(f"    [red]Scan error:[/red] {e}")
-
-        # Summary
-        console.print("\n[bold]Summary:[/bold]")
+        # Overall summary
+        console.print("\n[bold]Overall Summary:[/bold]")
         console.print(f"  Total: {total_downloads}")
         console.print(f"  [green]Success: {successful_downloads}[/green]")
         console.print(f"  [red]Failed: {failed_downloads}[/red]")
 
         if dry_run:
             console.print("\n[yellow]DRY RUN mode - No downloads performed[/yellow]")
-        
+
         # Trigger Jellyfin library refresh if configured and downloads were successful
         if successful_downloads > 0 and not dry_run:
             # Use command-line args if provided, otherwise use config
             jf_url = jellyfin_url or config.jellyfin_url
             jf_api_key = jellyfin_api_key or config.jellyfin_api_key
-            
+
             if jf_url and jf_api_key:
                 try:
                     console.print("\n[blue]Refreshing Jellyfin library...[/blue]")
                     jellyfin = JellyfinClient(jf_url, jf_api_key)
                     if jellyfin.refresh_library():
-                        console.print("[green]✓ Jellyfin library refresh triggered[/green]")
+                        console.print(
+                            "[green]✓ Jellyfin library refresh triggered[/green]"
+                        )
                     else:
-                        console.print("[yellow]⚠ Failed to trigger Jellyfin library refresh[/yellow]")
+                        console.print(
+                            "[yellow]⚠ Failed to trigger Jellyfin library refresh[/yellow]"
+                        )
                 except Exception as e:
                     console.print(f"[red]Jellyfin refresh error:[/red] {e}")
                     logger.exception("Error triggering Jellyfin refresh")

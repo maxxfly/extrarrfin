@@ -25,13 +25,15 @@ def list_command(
     mode: tuple = None,
 ):
     """Execute the list command logic"""
-    
+
     # Use mode from command line or config
     # If multiple modes specified, use them; otherwise use config mode
     if mode:
         active_modes = [*mode]
     elif not isinstance(config.mode, str):
-        active_modes = [*config.mode] if hasattr(config.mode, '__iter__') else [config.mode]
+        active_modes = (
+            [*config.mode] if hasattr(config.mode, "__iter__") else [config.mode]
+        )
     else:
         active_modes = [config.mode]
 
@@ -51,7 +53,9 @@ def list_command(
         include = False
         if "tag" in active_modes and sonarr.has_want_extras_tag(series):
             include = True
-        if "season0" in active_modes and sonarr.has_monitored_season_zero_episodes(series):
+        if "season0" in active_modes and sonarr.has_monitored_season_zero_episodes(
+            series
+        ):
             include = True
         if include:
             filtered_series.append(series)
@@ -67,13 +71,13 @@ def list_command(
 
     if not filtered_series:
         if len(active_modes) > 1:
-            console.print(f"[yellow]No series found for modes: {', '.join(active_modes)}[/yellow]")
+            console.print(
+                f"[yellow]No series found for modes: {', '.join(active_modes)}[/yellow]"
+            )
         elif "tag" in active_modes:
             console.print("[yellow]No series found with want-extras tag[/yellow]")
         else:
-            console.print(
-                "[yellow]No series found with monitored season 0[/yellow]"
-            )
+            console.print("[yellow]No series found with monitored season 0[/yellow]")
         return
 
     # Display table
@@ -99,9 +103,13 @@ def list_command(
         # Determine which mode(s) apply to this series
         has_tag = sonarr.has_want_extras_tag(series)
         has_season0 = sonarr.has_monitored_season_zero_episodes(series)
-        
+
         # In tag mode, we show the series but don't count episodes
-        if "tag" in active_modes and has_tag and not ("season0" in active_modes and has_season0):
+        if (
+            "tag" in active_modes
+            and has_tag
+            and not ("season0" in active_modes and has_season0)
+        ):
             # Get output directory for extras
             try:
                 output_dir = downloader.get_extras_directory(
@@ -135,9 +143,11 @@ def list_command(
                                     lang = parts[-1]
                                     if lang == "forced" and len(parts) >= 3:
                                         lang = parts[-2]
-                                    
+
                                     # Count by language
-                                    subtitle_by_lang[lang] = subtitle_by_lang.get(lang, 0) + 1
+                                    subtitle_by_lang[lang] = (
+                                        subtitle_by_lang.get(lang, 0) + 1
+                                    )
 
                 total_size += series_size
 
@@ -203,9 +213,7 @@ def list_command(
 
                 # Scan all monitored episodes to detect files
                 for ep in monitored_episodes:
-                    file_info = downloader.get_episode_file_info(
-                        series, ep, output_dir
-                    )
+                    file_info = downloader.get_episode_file_info(series, ep, output_dir)
 
                     if file_info["has_video"] or file_info["has_strm"]:
                         # Count size only for video files (not STRM)
@@ -223,14 +231,14 @@ def list_command(
                                 lang = parts[-1]
                                 if lang == "forced" and len(parts) >= 3:
                                     lang = parts[-2]
-                                subtitle_by_lang[lang] = subtitle_by_lang.get(lang, 0) + 1
+                                subtitle_by_lang[lang] = (
+                                    subtitle_by_lang.get(lang, 0) + 1
+                                )
 
                 # Also scan for ALL subtitle files in the directory
                 try:
                     all_files = [f for f in output_dir.glob("*.srt")]
-                    monitored_ep_nums = [
-                        ep.episode_number for ep in monitored_episodes
-                    ]
+                    monitored_ep_nums = [ep.episode_number for ep in monitored_episodes]
 
                     for file in all_files:
                         # Check if this is a subtitle for a monitored episode
@@ -247,7 +255,9 @@ def list_command(
                                         if lang == "forced" and len(parts) >= 3:
                                             lang = parts[-2]
                                         if lang not in subtitle_by_lang:
-                                            subtitle_by_lang[lang] = subtitle_by_lang.get(lang, 0) + 1
+                                            subtitle_by_lang[lang] = (
+                                                subtitle_by_lang.get(lang, 0) + 1
+                                            )
                             except (ValueError, IndexError):
                                 pass
                 except Exception as e:

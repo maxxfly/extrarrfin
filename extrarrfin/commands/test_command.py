@@ -1,11 +1,12 @@
 """Test command to verify Sonarr and Jellyfin connections"""
 
 import sys
+
 from rich.console import Console
 
 from ..config import Config
-from ..sonarr import SonarrClient
 from ..jellyfin import JellyfinClient
+from ..sonarr import SonarrClient
 
 console = Console()
 

@@ -29,7 +29,7 @@ def download_season0_mode(
 ):
     """
     Download monitored season 0 episodes for a series
-    
+
     Args:
         series: The series to process
         config: Configuration object
@@ -40,7 +40,7 @@ def download_season0_mode(
         force: If True, re-download even if file exists
         no_scan: If True, don't trigger Sonarr scan
         verbose: If True, show detailed info
-    
+
     Returns:
         Tuple of (total_downloads, successful_downloads, failed_downloads)
     """
@@ -94,15 +94,11 @@ def download_season0_mode(
         if dry_run:
             console.print(f"  [yellow]DRY RUN:[/yellow] {ep_info}")
             # Check if file exists
-            file_info = downloader.get_episode_file_info(
-                series, ep, output_dir
-            )
+            file_info = downloader.get_episode_file_info(series, ep, output_dir)
             if file_info["has_video"] or file_info["has_strm"]:
                 console.print(f"    [dim]File already present[/dim]")
             else:
-                console.print(
-                    f"    [dim]Would search and download from YouTube[/dim]"
-                )
+                console.print(f"    [dim]Would search and download from YouTube[/dim]")
 
             # Show what would happen with force mode
             if force and (file_info["has_video"] or file_info["has_strm"]):
@@ -117,9 +113,7 @@ def download_season0_mode(
 
         # Show verbose info if enabled
         if verbose:
-            console.print(
-                f"    [dim]Search query: '{series.title} {ep.title}'[/dim]"
-            )
+            console.print(f"    [dim]Search query: '{series.title} {ep.title}'[/dim]")
 
         # Download episode
         success, file_path, error = downloader.download_episode(
