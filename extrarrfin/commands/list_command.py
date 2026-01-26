@@ -104,204 +104,149 @@ def list_command(
         has_tag = sonarr.has_want_extras_tag(series)
         has_season0 = sonarr.has_monitored_season_zero_episodes(series)
 
-        # In tag mode, we show the series but don't count episodes
-        if (
-            "tag" in active_modes
-            and has_tag
-            and not ("season0" in active_modes and has_season0)
-        ):
-            # Get output directory for extras
+        # Initialize counters
+        downloaded_count = 0
+        missing_count = 0
+        subtitle_by_lang = {}
+        series_size = 0
+
+        # Process Season 0 episodes if applicable
+        if has_season0 and "season0" in active_modes:
             try:
-                output_dir = downloader.get_extras_directory(
-                    series, config.media_directory, config.sonarr_directory
-                )
-
-                # Count files in the extras directory
-                subtitle_by_lang = {}
-                series_size = 0
-                video_count = 0
-
-                if output_dir.exists():
-                    for file in output_dir.iterdir():
-                        if file.is_file():
-                            if file.suffix.lower() in {
-                                ".mp4",
-                                ".mkv",
-                                ".avi",
-                                ".mov",
-                                ".wmv",
-                                ".webm",
-                            }:
-                                video_count += 1
-                                series_size += file.stat().st_size
-                            elif file.suffix.lower() == ".srt":
-                                # Extract language from subtitle filename
-                                # Format: "filename.lang.srt" or "filename.lang.forced.srt"
-                                parts = file.stem.split(".")
-                                if len(parts) >= 2:
-                                    # Get the last part before extension (could be 'forced' or lang code)
-                                    lang = parts[-1]
-                                    if lang == "forced" and len(parts) >= 3:
-                                        lang = parts[-2]
-
-                                    # Count by language
-                                    subtitle_by_lang[lang] = (
-                                        subtitle_by_lang.get(lang, 0) + 1
-                                    )
-
-                total_size += series_size
-
-                # Format subtitle info
-                if subtitle_by_lang:
-                    parts = [
-                        f"{count} {lang}"
-                        for lang, count in sorted(subtitle_by_lang.items())
-                    ]
-                    srt_info = ", ".join(parts)
-                else:
-                    srt_info = "0"
-
-                # Format size
-                if series_size > 0:
-                    if series_size >= 1024**3:  # GB
-                        size_str = f"{series_size / (1024**3):.2f} GB"
-                    elif series_size >= 1024**2:  # MB
-                        size_str = f"{series_size / (1024**2):.2f} MB"
-                    elif series_size >= 1024:  # KB
-                        size_str = f"{series_size / 1024:.2f} KB"
-                    else:
-                        size_str = f"{series_size} B"
-                else:
-                    size_str = "-"
-
-                table.add_row(
-                    str(series.id),
-                    series.title,
-                    series.path,
-                    str(video_count),
-                    "-",
-                    srt_info,
-                    size_str,
-                )
-            except Exception as e:
-                logger.warning(f"Error processing series {series.title}: {e}")
-                table.add_row(
-                    str(series.id),
-                    series.title,
-                    series.path,
-                    "Error",
-                    "-",
-                    "-",
-                    "-",
-                )
-        else:
-            # Original season0 mode logic
-            # Get season 0 episodes
-            episodes = sonarr.get_season_zero_episodes(series.id)
-            monitored_episodes = [e for e in episodes if e.monitored]
-            missing = [e for e in monitored_episodes if not e.has_file]
-            downloaded = [e for e in monitored_episodes if e.has_file]
-
-            # Count subtitles and calculate size for downloaded episodes
-            subtitle_by_lang = {}
-            series_size = 0
-
-            try:
+                episodes = sonarr.get_season_zero_episodes(series.id)
+                monitored_episodes = [e for e in episodes if e.monitored]
+                
                 output_dir = downloader.get_series_directory(
                     series, config.media_directory, config.sonarr_directory
                 )
 
-                # Scan all monitored episodes to detect files
+                # Track which subtitle files we've already counted
+                counted_srt_files = set()
+
+                # Count files by actually scanning the directory
                 for ep in monitored_episodes:
                     file_info = downloader.get_episode_file_info(series, ep, output_dir)
-
+                    
+                    # Check if episode has a file
                     if file_info["has_video"] or file_info["has_strm"]:
-                        # Count size only for video files (not STRM)
-                        if file_info["video_path"]:
-                            video_path = Path(file_info["video_path"])
+                        downloaded_count += 1
+                        
+                        # Add video file size
+                        if file_info["video_file"]:
+                            video_path = output_dir / file_info["video_file"]
                             if video_path.exists():
                                 series_size += video_path.stat().st_size
+                        
+                        # Add STRM file size (tiny but for completeness)
+                        if file_info["strm_file"]:
+                            strm_path = output_dir / file_info["strm_file"]
+                            if strm_path.exists():
+                                series_size += strm_path.stat().st_size
+                    else:
+                        # No file = missing
+                        missing_count += 1
 
                     # Count subtitles for this episode
-                    if file_info["subtitle_files"]:
-                        for srt_file in file_info["subtitle_files"]:
-                            srt_path = Path(srt_file)
-                            parts = srt_path.stem.split(".")
+                    for lang, srt_files in file_info["subtitles"].items():
+                        # Count all subtitle files for this language
+                        subtitle_by_lang[lang] = subtitle_by_lang.get(lang, 0) + len(srt_files)
+                        
+                        # Add sizes and track files
+                        for srt_filename in srt_files:
+                            counted_srt_files.add(srt_filename)
+                            srt_path = output_dir / srt_filename
+                            if srt_path.exists():
+                                series_size += srt_path.stat().st_size
+                
+                # Also scan ALL .srt files in the directory (including non-monitored episodes)
+                # to give a complete picture of what's actually on disk
+                try:
+                    all_srt_files = list(output_dir.glob("*.srt"))
+                    for srt_file in all_srt_files:
+                        if not srt_file.is_file() or srt_file.name in counted_srt_files:
+                            continue
+                        
+                        # This is a subtitle for a non-monitored episode
+                        parts = srt_file.stem.split(".")
+                        if len(parts) >= 2:
+                            lang = parts[-1]
+                            if lang == "forced" and len(parts) >= 3:
+                                lang = parts[-2]
+                        else:
+                            lang = "unknown"
+                        
+                        subtitle_by_lang[lang] = subtitle_by_lang.get(lang, 0) + 1
+                        series_size += srt_file.stat().st_size
+                except Exception as e:
+                    logger.warning(f"Error scanning all srt files for {series.title}: {e}")
+            except Exception as e:
+                logger.warning(f"Error processing season0 for {series.title}: {e}")
+
+        # Process extras (tag mode) if applicable
+        if has_tag and "tag" in active_modes:
+            try:
+                extras_dir = downloader.get_extras_directory(
+                    series, config.media_directory, config.sonarr_directory
+                )
+
+                if extras_dir.exists():
+                    for file in extras_dir.iterdir():
+                        if not file.is_file():
+                            continue
+                            
+                        file_size = file.stat().st_size
+                        
+                        if file.suffix.lower() in {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm"}:
+                            # Video file in extras
+                            downloaded_count += 1
+                            series_size += file_size
+                            
+                        elif file.suffix.lower() == ".srt":
+                            # Subtitle in extras
+                            series_size += file_size
+                            parts = file.stem.split(".")
                             if len(parts) >= 2:
                                 lang = parts[-1]
                                 if lang == "forced" and len(parts) >= 3:
                                     lang = parts[-2]
-                                subtitle_by_lang[lang] = (
-                                    subtitle_by_lang.get(lang, 0) + 1
-                                )
+                                subtitle_by_lang[lang] = subtitle_by_lang.get(lang, 0) + 1
+            except Exception as e:
+                logger.warning(f"Error processing extras for {series.title}: {e}")
 
-                # Also scan for ALL subtitle files in the directory
-                try:
-                    all_files = [f for f in output_dir.glob("*.srt")]
-                    monitored_ep_nums = [ep.episode_number for ep in monitored_episodes]
+        total_size += series_size
 
-                    for file in all_files:
-                        # Check if this is a subtitle for a monitored episode
-                        # Expected format: "SeriesName - S00E01.lang.srt"
-                        if "S00E" in file.stem:
-                            ep_num_str = file.stem.split("S00E")[1].split(".")[0]
-                            try:
-                                ep_num = int(ep_num_str)
-                                if ep_num in monitored_ep_nums:
-                                    # Extract language
-                                    parts = file.stem.split(".")
-                                    if len(parts) >= 2:
-                                        lang = parts[-1]
-                                        if lang == "forced" and len(parts) >= 3:
-                                            lang = parts[-2]
-                                        if lang not in subtitle_by_lang:
-                                            subtitle_by_lang[lang] = (
-                                                subtitle_by_lang.get(lang, 0) + 1
-                                            )
-                            except (ValueError, IndexError):
-                                pass
-                except Exception as e:
-                    logger.warning(
-                        f"Error scanning directory for additional subtitles: {e}"
-                    )
+        # Format subtitle info
+        if subtitle_by_lang:
+            parts = [f"{count} {lang}" for lang, count in sorted(subtitle_by_lang.items())]
+            srt_info = ", ".join(parts)
+        else:
+            srt_info = "0"
 
-                total_size += series_size
-            except Exception:
-                # If we can't access the directory, just skip counting
-                pass
-
-            # Format subtitle info
-            if subtitle_by_lang:
-                parts = [
-                    f"{count} {lang}"
-                    for lang, count in sorted(subtitle_by_lang.items())
-                ]
-                srt_info = ", ".join(parts)
+        # Format size
+        if series_size > 0:
+            if series_size >= 1024**3:  # GB
+                size_str = f"{series_size / (1024**3):.2f} GB"
+            elif series_size >= 1024**2:  # MB
+                size_str = f"{series_size / (1024**2):.2f} MB"
+            elif series_size >= 1024:  # KB
+                size_str = f"{series_size / 1024:.2f} KB"
             else:
-                srt_info = "0"
+                size_str = f"{series_size} B"
+        else:
+            size_str = "-"
 
-            # Format size
-            if series_size > 0:
-                if series_size >= 1024**3:  # GB
-                    size_str = f"{series_size / (1024**3):.2f} GB"
-                elif series_size >= 1024**2:  # MB
-                    size_str = f"{series_size / (1024**2):.2f} MB"
-                elif series_size >= 1024:  # KB
-                    size_str = f"{series_size / 1024:.2f} KB"
-                else:
-                    size_str = f"{series_size} B"
-            else:
-                size_str = "-"
+        # Show missing count or dash
+        missing_str = str(missing_count) if missing_count > 0 else "-"
 
-            table.add_row(
-                str(series.id),
-                series.title,
-                series.path,
-                str(len(downloaded)),
-                str(len(missing)),
-                srt_info,
-                size_str,
-            )
+        table.add_row(
+            str(series.id),
+            series.title,
+            series.path,
+            str(downloaded_count),
+            missing_str,
+            srt_info,
+            size_str,
+        )
 
     console.print(table)
 

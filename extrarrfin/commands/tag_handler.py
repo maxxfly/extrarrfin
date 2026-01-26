@@ -3,6 +3,7 @@ Tag mode handler - Download behind the scenes videos for tagged series
 """
 
 import logging
+import time
 
 import yt_dlp
 from rich.console import Console
@@ -160,7 +161,7 @@ def _download_series_extras(
 
         console.print(f"  [blue]Downloading {video_title}...[/blue]")
 
-        # Download using yt-dlp directly
+        # Download using yt-dlp directly with retry logic for 403 errors
         output_template = str(output_dir / f"{base_filename}.%(ext)s")
 
         ydl_opts = {
@@ -189,31 +190,59 @@ def _download_series_extras(
             ],
         }
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.extract_info(video_info["url"], download=True)
+        # Retry logic for 403 errors
+        max_retries = 3
+        retry_delay = 3  # seconds
+        download_success = False
+        last_error = None
 
-            # Create .nfo file with video metadata
-            nfo_path = output_dir / f"{base_filename}.nfo"
-            with open(nfo_path, "w", encoding="utf-8") as nfo:
-                nfo.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
-                nfo.write("<movie>\n")
-                nfo.write(f"  <title>{video_info['title']}</title>\n")
-                nfo.write(f"  <originaltitle>{video_info['title']}</originaltitle>\n")
-                nfo.write(f"  <plot>{video_info.get('description', '')}</plot>\n")
-                nfo.write(f"  <studio>{video_info.get('channel', '')}</studio>\n")
-                nfo.write(f"  <director>{video_info.get('uploader', '')}</director>\n")
-                nfo.write(f"  <source>YouTube</source>\n")
-                nfo.write(f"  <id>{video_info['id']}</id>\n")
-                nfo.write(f"  <youtubeurl>{video_info['url']}</youtubeurl>\n")
-                if video_info.get("duration"):
-                    nfo.write(f"  <runtime>{video_info['duration'] // 60}</runtime>\n")
-                nfo.write("</movie>\n")
+        for attempt in range(max_retries):
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.extract_info(video_info["url"], download=True)
 
-            console.print(f"    [green]✓ Downloaded {video_title}[/green]")
-            successful_downloads += 1
-        except Exception as e:
-            console.print(f"    [red]✗ Failed:[/red] {e}")
+                # Create .nfo file with video metadata
+                nfo_path = output_dir / f"{base_filename}.nfo"
+                with open(nfo_path, "w", encoding="utf-8") as nfo:
+                    nfo.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
+                    nfo.write("<movie>\n")
+                    nfo.write(f"  <title>{video_info['title']}</title>\n")
+                    nfo.write(f"  <originaltitle>{video_info['title']}</originaltitle>\n")
+                    nfo.write(f"  <plot>{video_info.get('description', '')}</plot>\n")
+                    nfo.write(f"  <studio>{video_info.get('channel', '')}</studio>\n")
+                    nfo.write(f"  <director>{video_info.get('uploader', '')}</director>\n")
+                    nfo.write(f"  <source>YouTube</source>\n")
+                    nfo.write(f"  <id>{video_info['id']}</id>\n")
+                    nfo.write(f"  <youtubeurl>{video_info['url']}</youtubeurl>\n")
+                    if video_info.get("duration"):
+                        nfo.write(f"  <runtime>{video_info['duration'] // 60}</runtime>\n")
+                    nfo.write("</movie>\n")
+
+                console.print(f"    [green]✓ Downloaded {video_title}[/green]")
+                successful_downloads += 1
+                download_success = True
+                break  # Success, exit retry loop
+
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+                
+                # Check if it's a 403 error
+                if "403" in error_str or "forbidden" in error_str:
+                    if attempt < max_retries - 1:  # Not the last attempt
+                        console.print(
+                            f"    [yellow]⚠ HTTP 403 error, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})[/yellow]"
+                        )
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        console.print(f"    [red]✗ Failed after {max_retries} attempts:[/red] {e}")
+                else:
+                    # Not a 403 error, don't retry
+                    console.print(f"    [red]✗ Failed:[/red] {e}")
+                    break
+
+        if not download_success:
             failed_downloads += 1
 
     # Trigger Sonarr scan if requested

@@ -84,10 +84,16 @@ def list(ctx, limit, mode):
     downloader: Downloader = ctx.obj["downloader"]
 
     # Determine which modes to run
-    modes = [*mode] if mode else (
-        [*config.mode] if isinstance(config.mode, tuple) else 
-        [config.mode] if config.mode else 
-        ["season0"]
+    modes = (
+        [*mode]
+        if mode
+        else (
+            [*config.mode]
+            if isinstance(config.mode, tuple)
+            else [config.mode]
+            if config.mode
+            else ["season0"]
+        )
     )
 
     list_command(config, sonarr, downloader, limit, modes)
