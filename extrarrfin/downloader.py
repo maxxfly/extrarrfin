@@ -606,6 +606,15 @@ class Downloader:
         """
         base_filename = self.build_jellyfin_filename(series, episode)
 
+        # Create a pattern based on series and episode number only
+        # Format: SeriesName - S00E##
+        # This allows detection of files even if the episode title differs slightly
+        # between Sonarr and the actual filename
+        series_name = self.sanitize_filename(series.title)
+        episode_pattern = (
+            f"{series_name} - S{episode.season_number:02d}E{episode.episode_number:02d}"
+        )
+
         # Use pathlib to list all files in directory and filter manually
         # This avoids glob pattern issues with special characters
         try:
@@ -613,12 +622,16 @@ class Downloader:
         except Exception:
             all_files = []
 
-        # Filter files that start with our base_filename
-        existing_files = [
-            f
-            for f in all_files
-            if f.is_file() and f.name.startswith(base_filename + ".")
-        ]
+        # Filter files that match the episode pattern (SeriesName - S00E##)
+        # This is more tolerant than exact title matching and prevents re-downloading
+        # files that exist but have slightly different titles
+        existing_files = []
+        for f in all_files:
+            if not f.is_file():
+                continue
+            # Use the broader episode pattern for all file types
+            if f.name.startswith(episode_pattern):
+                existing_files.append(f)
 
         info: dict = {
             "has_video": False,
@@ -641,16 +654,24 @@ class Downloader:
             elif file.suffix.lower() == ".srt":
                 # Extract language code from filename
                 # Format: Series - S00E01 - Title.lang.srt or Series - S00E01 - Title.srt
-                # Remove base_filename and leading dot to get the remaining part
-                remaining = file.stem[len(base_filename) :]
-                if remaining.startswith("."):
-                    remaining = remaining[1:]
-
-                # If there's a remaining part, it's the language code
-                if remaining:
-                    lang = remaining.split(".")[0]  # Take first part if multiple dots
-                else:
+                # Remove base_filename to get the remaining part
+                # Handle both cases: with dot separator and without
+                if file.stem == base_filename:
+                    # Exact match, no language code: Series - S00E01 - Title.srt
                     lang = "unknown"
+                elif file.stem.startswith(base_filename + "."):
+                    # With dot separator: Series - S00E01 - Title.lang.srt
+                    remaining = file.stem[len(base_filename) + 1 :]
+                    lang = remaining.split(".")[0] if remaining else "unknown"
+                else:
+                    # Fallback: try to extract from the end of filename
+                    # Could be Series - S00E01 - Title.lang.srt or similar variations
+                    parts = file.stem.split(".")
+                    if len(parts) > 1:
+                        # Last part before extension might be language code
+                        lang = parts[-1]
+                    else:
+                        lang = "unknown"
 
                 subtitles_dict = info["subtitles"]
                 if lang not in subtitles_dict:

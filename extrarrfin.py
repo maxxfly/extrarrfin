@@ -167,6 +167,55 @@ def list(ctx, limit):
                             if srt_path.exists():
                                 series_size += srt_path.stat().st_size
 
+                # Also scan for ALL subtitle files in the directory, even for non-monitored episodes
+                # This gives a complete picture of what's actually on disk
+                import builtins
+                import re
+
+                try:
+                    all_files = builtins.list(output_dir.iterdir())
+                    series_name = downloader.sanitize_filename(series.title)
+                    monitored_ep_nums = [ep.episode_number for ep in monitored_episodes]
+
+                    for file in all_files:
+                        if not file.is_file() or file.suffix.lower() != ".srt":
+                            continue
+
+                        # Check if this .srt file belongs to this series (Season 0)
+                        if not file.name.startswith(f"{series_name} - S00E"):
+                            continue
+
+                        # Parse episode number from filename
+                        match = re.search(r"S00E(\d+)", file.name)
+                        if not match:
+                            continue
+
+                        ep_num = int(match.group(1))
+
+                        # Skip if we already counted this episode (it was monitored)
+                        if ep_num in monitored_ep_nums:
+                            continue
+
+                        # This is a subtitle for a non-monitored episode, count it
+                        # Extract language from filename
+                        stem = str(file.stem)
+                        parts = stem.split(".")
+                        if len(parts) > 1:
+                            lang = parts[-1]
+                        else:
+                            lang = "unknown"
+
+                        if lang not in subtitle_by_lang:
+                            subtitle_by_lang[lang] = 0
+                        subtitle_by_lang[lang] += 1
+
+                        # Add file size
+                        series_size += file.stat().st_size
+                except Exception as e:
+                    logger.warning(
+                        f"Error scanning directory for additional subtitles: {e}"
+                    )
+
                 total_size += series_size
             except Exception:
                 # If we can't access the directory, just skip counting
@@ -302,18 +351,6 @@ def download(ctx, limit, episode, dry_run, force, no_scan, verbose):
             )
             return
 
-        # Safety check: warn if force mode is used without limit
-        if force and not limit and not dry_run:
-            console.print(
-                f"\n[bold yellow]Warning:[/bold yellow] Force mode will re-download "
-                f"ALL episodes for {len(series_with_season0)} series!"
-            )
-            console.print("[dim]Tip: Use --limit to target a specific series[/dim]")
-
-            if not click.confirm("Do you want to continue?", default=False):
-                console.print("[yellow]Operation cancelled[/yellow]")
-                return
-
         # Process each series
         total_downloads = 0
         successful_downloads = 0
@@ -356,21 +393,19 @@ def download(ctx, limit, episode, dry_run, force, no_scan, verbose):
                 continue
 
             # Process each episode
-            for episode in to_process:
+            for ep in to_process:
                 total_downloads += 1
                 ep_info = format_episode_info(
                     series.title,
-                    episode.season_number,
-                    episode.episode_number,
-                    episode.title,
+                    ep.season_number,
+                    ep.episode_number,
+                    ep.title,
                 )
 
                 if dry_run:
                     console.print(f"  [yellow]DRY RUN:[/yellow] {ep_info}")
                     # Check if file exists
-                    file_info = downloader.get_episode_file_info(
-                        series, episode, output_dir
-                    )
+                    file_info = downloader.get_episode_file_info(series, ep, output_dir)
                     if file_info["has_video"] or file_info["has_strm"]:
                         console.print(f"    [dim]File already present[/dim]")
                     else:
@@ -392,13 +427,13 @@ def download(ctx, limit, episode, dry_run, force, no_scan, verbose):
                 # Show verbose info if enabled
                 if verbose:
                     console.print(
-                        f"    [dim]Search query: '{series.title} {episode.title}'[/dim]"
+                        f"    [dim]Search query: '{series.title} {ep.title}'[/dim]"
                     )
 
                 # Download episode
                 success, file_path, error = downloader.download_episode(
                     series,
-                    episode,
+                    ep,
                     output_dir,
                     force=force,
                     dry_run=dry_run,
