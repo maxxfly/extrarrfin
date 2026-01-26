@@ -347,10 +347,16 @@ def download(
 
     # Determine which modes to run
     # Use mode from CLI if provided, otherwise use config, otherwise default to season0
-    modes = [*mode] if mode else (
-        [*config.mode] if isinstance(config.mode, tuple) else 
-        [config.mode] if config.mode else 
-        ["season0"]
+    modes = (
+        [*mode]
+        if mode
+        else (
+            [*config.mode]
+            if isinstance(config.mode, tuple)
+            else [config.mode]
+            if config.mode
+            else ["season0"]
+        )
     )
 
     try:
@@ -378,7 +384,9 @@ def download(
                 failed_downloads += failed
 
             elif current_mode == "tag":
-                console.print("\n[bold magenta]Mode: Tag (Behind-the-Scenes)[/bold magenta]")
+                console.print(
+                    "\n[bold magenta]Mode: Tag (Behind-the-Scenes)[/bold magenta]"
+                )
                 total, success, failed = download_tag_mode(
                     config,
                     sonarr,
