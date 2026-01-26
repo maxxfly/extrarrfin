@@ -68,219 +68,29 @@ def cli(ctx, config, sonarr_url, sonarr_api_key, media_dir, sonarr_dir, log_leve
 
 @cli.command()
 @click.option("--limit", "-l", help="Limit to specific series (name or ID)")
+@click.option(
+    "--mode",
+    "-m",
+    type=click.Choice(["season0", "tag"]),
+    multiple=True,
+    help="List mode: season0 (monitored Season 0 episodes) or tag (series with want-extras tag). Can be specified multiple times.",
+)
 @click.pass_context
-def list(ctx, limit):
-    """List all series with monitored season 0"""
+def list(ctx, limit, mode):
+    """List all series with monitored season 0 or tagged series"""
 
     config: Config = ctx.obj["config"]
     sonarr: SonarrClient = ctx.obj["sonarr"]
     downloader: Downloader = ctx.obj["downloader"]
 
-    try:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Fetching series...", total=None)
-            series_list = sonarr.get_monitored_series()
-            progress.update(task, completed=True)
+    # Determine which modes to run
+    modes = [*mode] if mode else (
+        [*config.mode] if isinstance(config.mode, tuple) else 
+        [config.mode] if config.mode else 
+        ["season0"]
+    )
 
-        # Filter to keep only those with monitored season 0 episodes
-        series_with_season0 = [
-            s for s in series_list if sonarr.has_monitored_season_zero_episodes(s)
-        ]
-
-        # Filter by name/ID if specified
-        if limit:
-            if limit.isdigit():
-                series_with_season0 = [
-                    s for s in series_with_season0 if s.id == int(limit)
-                ]
-            else:
-                series_with_season0 = [
-                    s for s in series_with_season0 if limit.lower() in s.title.lower()
-                ]
-
-        if not series_with_season0:
-            console.print("[yellow]No series found with monitored season 0[/yellow]")
-            return
-
-        # Display table
-        table = Table(
-            title=f"Series with Monitored Season 0 ({len(series_with_season0)})"
-        )
-        table.add_column("ID", style="cyan")
-        table.add_column("Title", style="green")
-        table.add_column("Path", style="dim")
-        table.add_column("Downloaded", style="blue")
-        table.add_column("Missing", style="yellow")
-        table.add_column("Subtitles", style="magenta")
-        table.add_column("Size", style="cyan")
-
-        total_size = 0
-
-        for series in series_with_season0:
-            # Get season 0 episodes
-            episodes = sonarr.get_season_zero_episodes(series.id)
-            monitored_episodes = [e for e in episodes if e.monitored]
-            missing = [e for e in monitored_episodes if not e.has_file]
-            downloaded = [e for e in monitored_episodes if e.has_file]
-
-            # Count subtitles and calculate size for downloaded episodes
-            # We scan ALL monitored episodes, not just those Sonarr considers downloaded
-            # because STRM files might not be detected by Sonarr
-            subtitle_by_lang = {}
-            series_size = 0
-
-            try:
-                output_dir = downloader.get_series_directory(
-                    series, config.media_directory, config.sonarr_directory
-                )
-
-                # Scan all monitored episodes to detect files
-                for ep in monitored_episodes:
-                    file_info = downloader.get_episode_file_info(series, ep, output_dir)
-
-                    # Only count if there are actual files
-                    if (
-                        not file_info["has_video"]
-                        and not file_info["has_strm"]
-                        and not file_info["subtitles"]
-                    ):
-                        continue
-
-                    # Count subtitles by language
-                    for lang, files in file_info["subtitles"].items():
-                        if lang not in subtitle_by_lang:
-                            subtitle_by_lang[lang] = 0
-                        subtitle_by_lang[lang] += len(files)
-
-                    # Calculate file sizes
-                    if file_info["video_file"]:
-                        video_path = output_dir / file_info["video_file"]
-                        if video_path.exists():
-                            series_size += video_path.stat().st_size
-
-                    if file_info["strm_file"]:
-                        strm_path = output_dir / file_info["strm_file"]
-                        if strm_path.exists():
-                            series_size += strm_path.stat().st_size
-
-                    # Add subtitle file sizes
-                    for srt_files_list in file_info["subtitles"].values():
-                        for srt_file in srt_files_list:
-                            srt_path = output_dir / srt_file
-                            if srt_path.exists():
-                                series_size += srt_path.stat().st_size
-
-                # Also scan for ALL subtitle files in the directory, even for non-monitored episodes
-                # This gives a complete picture of what's actually on disk
-                import builtins
-                import re
-
-                try:
-                    all_files = builtins.list(output_dir.iterdir())
-                    series_name = downloader.sanitize_filename(series.title)
-                    monitored_ep_nums = [ep.episode_number for ep in monitored_episodes]
-
-                    for file in all_files:
-                        if not file.is_file() or file.suffix.lower() != ".srt":
-                            continue
-
-                        # Check if this .srt file belongs to this series (Season 0)
-                        if not file.name.startswith(f"{series_name} - S00E"):
-                            continue
-
-                        # Parse episode number from filename
-                        match = re.search(r"S00E(\d+)", file.name)
-                        if not match:
-                            continue
-
-                        ep_num = int(match.group(1))
-
-                        # Skip if we already counted this episode (it was monitored)
-                        if ep_num in monitored_ep_nums:
-                            continue
-
-                        # This is a subtitle for a non-monitored episode, count it
-                        # Extract language from filename
-                        stem = str(file.stem)
-                        parts = stem.split(".")
-                        if len(parts) > 1:
-                            lang = parts[-1]
-                        else:
-                            lang = "unknown"
-
-                        if lang not in subtitle_by_lang:
-                            subtitle_by_lang[lang] = 0
-                        subtitle_by_lang[lang] += 1
-
-                        # Add file size
-                        series_size += file.stat().st_size
-                except Exception as e:
-                    logger.warning(
-                        f"Error scanning directory for additional subtitles: {e}"
-                    )
-
-                total_size += series_size
-            except Exception:
-                # If we can't access the directory, just skip counting
-                pass
-
-            # Format subtitle info
-            if subtitle_by_lang:
-                # Show count per language: "3 fr, 2 en"
-                parts = [
-                    f"{count} {lang}"
-                    for lang, count in sorted(subtitle_by_lang.items())
-                ]
-                srt_info = ", ".join(parts)
-            else:
-                srt_info = "0"
-
-            # Format size
-            if series_size > 0:
-                if series_size >= 1024**3:  # GB
-                    size_str = f"{series_size / (1024**3):.2f} GB"
-                elif series_size >= 1024**2:  # MB
-                    size_str = f"{series_size / (1024**2):.2f} MB"
-                elif series_size >= 1024:  # KB
-                    size_str = f"{series_size / 1024:.2f} KB"
-                else:
-                    size_str = f"{series_size} B"
-            else:
-                size_str = "-"
-
-            table.add_row(
-                str(series.id),
-                series.title,
-                series.path,
-                str(len(downloaded)),
-                str(len(missing)),
-                srt_info,
-                size_str,
-            )
-
-        console.print(table)
-
-        # Display total size
-        if total_size > 0:
-            if total_size >= 1024**3:  # GB
-                total_size_str = f"{total_size / (1024**3):.2f} GB"
-            elif total_size >= 1024**2:  # MB
-                total_size_str = f"{total_size / (1024**2):.2f} MB"
-            elif total_size >= 1024:  # KB
-                total_size_str = f"{total_size / 1024:.2f} KB"
-            else:
-                total_size_str = f"{total_size} B"
-
-            console.print(f"\n[bold cyan]Total size:[/bold cyan] {total_size_str}")
-
-    except Exception as e:
-        console.print(f"[red]Error:[/red] {e}")
-        logger.exception("Error during listing")
-        sys.exit(1)
+    list_command(config, sonarr, downloader, limit, modes)
 
 
 @cli.command()
