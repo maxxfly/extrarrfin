@@ -21,6 +21,12 @@ from extrarrfin.config import Config
 from extrarrfin.downloader import Downloader
 from extrarrfin.sonarr import SonarrClient
 from extrarrfin.utils import format_episode_info, setup_logging
+from extrarrfin.commands import (
+    list_command,
+    download_tag_mode,
+    download_season0_mode,
+    test_command,
+)
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -299,8 +305,18 @@ def list(ctx, limit):
     is_flag=True,
     help="Verbose mode (show detailed YouTube search and download info)",
 )
+@click.option(
+    "--jellyfin-url",
+    envvar="JELLYFIN_URL",
+    help="Jellyfin server URL (e.g., http://localhost:8096)",
+)
+@click.option(
+    "--jellyfin-api-key",
+    envvar="JELLYFIN_API_KEY",
+    help="Jellyfin API key for library refresh",
+)
 @click.pass_context
-def download(ctx, limit, episode, dry_run, force, no_scan, verbose):
+def download(ctx, limit, episode, dry_run, force, no_scan, verbose, jellyfin_url, jellyfin_api_key):
     """Download missing season 0 episodes"""
 
     config: Config = ctx.obj["config"]
@@ -463,6 +479,24 @@ def download(ctx, limit, episode, dry_run, force, no_scan, verbose):
 
         if dry_run:
             console.print("\n[yellow]DRY RUN mode - No downloads performed[/yellow]")
+        
+        # Trigger Jellyfin library refresh if configured and downloads were successful
+        if successful_downloads > 0 and not dry_run:
+            # Use command-line args if provided, otherwise use config
+            jf_url = jellyfin_url or config.jellyfin_url
+            jf_api_key = jellyfin_api_key or config.jellyfin_api_key
+            
+            if jf_url and jf_api_key:
+                try:
+                    console.print("\n[blue]Refreshing Jellyfin library...[/blue]")
+                    jellyfin = JellyfinClient(jf_url, jf_api_key)
+                    if jellyfin.refresh_library():
+                        console.print("[green]✓ Jellyfin library refresh triggered[/green]")
+                    else:
+                        console.print("[yellow]⚠ Failed to trigger Jellyfin library refresh[/yellow]")
+                except Exception as e:
+                    console.print(f"[red]Jellyfin refresh error:[/red] {e}")
+                    logger.exception("Error triggering Jellyfin refresh")
 
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
@@ -495,32 +529,22 @@ def scan(ctx, series_id, dry_run):
 
 
 @cli.command()
+@click.option(
+    "--jellyfin-url",
+    envvar="JELLYFIN_URL",
+    help="Jellyfin server URL (e.g., http://localhost:8096)",
+)
+@click.option(
+    "--jellyfin-api-key",
+    envvar="JELLYFIN_API_KEY",
+    help="Jellyfin API key for library refresh",
+)
 @click.pass_context
-def test(ctx):
-    """Test connection to Sonarr"""
-
+def test(ctx, jellyfin_url, jellyfin_api_key):
+    """Test connection to Sonarr and Jellyfin"""
     config: Config = ctx.obj["config"]
     sonarr: SonarrClient = ctx.obj["sonarr"]
-
-    try:
-        console.print("Testing Sonarr connection...")
-        console.print(f"URL: {config.sonarr_url}")
-
-        series = sonarr.get_all_series()
-        console.print(f"[green]✓ Connection successful![/green]")
-        console.print(f"Number of series: {len(series)}")
-
-        monitored = [s for s in series if s.monitored]
-        console.print(f"Monitored series: {len(monitored)}")
-
-        with_season0 = [
-            s for s in monitored if sonarr.has_monitored_season_zero_episodes(s)
-        ]
-        console.print(f"With monitored season 0 episodes: {len(with_season0)}")
-
-    except Exception as e:
-        console.print(f"[red]✗ Connection error:[/red] {e}")
-        sys.exit(1)
+    test_command(config, sonarr, jellyfin_url, jellyfin_api_key)
 
 
 @cli.command()

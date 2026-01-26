@@ -23,6 +23,7 @@ class Config:
     schedule_enabled: bool = False
     schedule_interval: int = 1
     schedule_unit: str = "hours"
+    mode: str | list[str] = "season0"  # "season0", "tag", or ["season0", "tag"]
     # Subtitle options
     subtitle_languages: list = field(
         default_factory=lambda: ["fr", "en", "fr-FR", "en-US", "en-GB"]
@@ -30,6 +31,9 @@ class Config:
     download_all_subtitles: bool = False
     # STRM file option
     use_strm_files: bool = False
+    # Jellyfin integration
+    jellyfin_url: str | None = None
+    jellyfin_api_key: str | None = None
 
     @classmethod
     def from_file(cls, config_path: Path) -> "Config":

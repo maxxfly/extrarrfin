@@ -42,6 +42,7 @@ class Series:
     year: int | None = None
     tvdb_id: int | None = None
     network: str | None = None
+    tags: List[int] | None = None  # List of tag IDs from Sonarr
 
 
 @dataclass

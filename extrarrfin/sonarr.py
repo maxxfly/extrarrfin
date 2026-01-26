@@ -22,6 +22,8 @@ class SonarrClient:
         self.session.headers.update(
             {"X-Api-Key": api_key, "Content-Type": "application/json"}
         )
+        # Cache for tags
+        self._tags_cache: dict[int, str] | None = None
 
     def _get(self, endpoint: str, params: dict | None = None) -> dict:
         """Perform a GET request to the API"""
@@ -43,6 +45,15 @@ class SonarrClient:
         response = self.session.put(url, json=data)
         response.raise_for_status()
         return response.json()
+
+    def get_all_tags(self) -> dict[int, str]:
+        """Fetch all tags and return a mapping of tag_id -> tag_label"""
+        if self._tags_cache is not None:
+            return self._tags_cache
+
+        data = self._get("tag")
+        self._tags_cache = {tag["id"]: tag["label"] for tag in data}
+        return self._tags_cache
 
     def get_all_series(self) -> List[Series]:
         """Fetch all series"""
@@ -68,6 +79,7 @@ class SonarrClient:
                 year=item.get("year"),
                 tvdb_id=item.get("tvdbId"),
                 network=item.get("network"),
+                tags=item.get("tags", []),
             )
             series_list.append(series)
 
@@ -164,3 +176,19 @@ class SonarrClient:
         except Exception as e:
             logger.error(f"Error during rename: {e}")
             raise
+
+    def has_want_extras_tag(self, series: Series) -> bool:
+        """Check if series has 'want-extras' or 'want_extras' tag"""
+        if not series.tags:
+            return False
+
+        # Get all tags to map IDs to labels
+        all_tags = self.get_all_tags()
+
+        # Check if any of the series tags match want-extras or want_extras
+        for tag_id in series.tags:
+            tag_label = all_tags.get(tag_id, "").lower()
+            if tag_label in ["want-extras", "want_extras"]:
+                return True
+
+        return False

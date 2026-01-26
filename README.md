@@ -17,6 +17,7 @@
 - 🐳 **Docker support**: Run in a container with Alpine-based image
 - 📝 **Subtitle management**: Automatic download and conversion to SRT format
 - 📺 **STRM mode**: Create streaming files instead of downloading (saves disk space)
+- 🏷️ **Tag mode**: Download behind-the-scenes videos based on Sonarr tags ([see documentation](TAG_MODE.md))
 
 ## � What Gets Downloaded?
 
@@ -148,6 +149,10 @@ sonarr_url: "http://localhost:8989"
 # Sonarr API key
 sonarr_api_key: "your_api_key_here"
 
+# Jellyfin configuration (optional)
+jellyfin_url: "http://localhost:8096"
+jellyfin_api_key: "your_jellyfin_api_key_here"
+
 # Directory where your media is located (optional)
 media_directory: "/mnt/media/TV Shows"
 
@@ -193,6 +198,8 @@ Or export variables directly:
 ```bash
 export SONARR_URL="http://localhost:8989"
 export SONARR_API_KEY="your_api_key_here"
+export JELLYFIN_URL="http://localhost:8096"
+export JELLYFIN_API_KEY="your_jellyfin_api_key_here"
 export MEDIA_DIRECTORY="/mnt/media/TV Shows"
 export SONARR_DIRECTORY="/tv"
 export SUBTITLE_LANGUAGES="fr,en,es"
@@ -214,9 +221,28 @@ python extrarrfin.py --sonarr-url http://localhost:8989 --sonarr-api-key YOUR_KE
 
 ```bash
 python extrarrfin.py test
+
+# Test with specific Jellyfin credentials
+python extrarrfin.py test --jellyfin-url http://localhost:8096 --jellyfin-api-key YOUR_KEY
 ```
 
-Verifies that the connection to Sonarr is working correctly.
+Verifies that the connection to Sonarr and Jellyfin (if configured) is working correctly.
+
+**Example output:**
+```
+Testing Sonarr connection...
+URL: http://localhost:8989
+✓ Connection successful!
+Number of series: 42
+Monitored series: 35
+With monitored season 0 episodes: 12
+
+Testing Jellyfin connection...
+URL: http://localhost:8096
+✓ Jellyfin connection successful!
+Server: My Jellyfin Server
+Version: 10.8.13
+```
 
 #### `list` - List series and episodes
 
@@ -258,6 +284,9 @@ python extrarrfin.py download --dry-run
 
 # Download all missing episodes
 python extrarrfin.py download
+
+# Download with automatic Jellyfin library refresh
+python extrarrfin.py download --jellyfin-url http://localhost:8096 --jellyfin-api-key YOUR_KEY
 
 # Limit to a specific series (by name or ID)
 python extrarrfin.py download --limit "Breaking Bad"
@@ -452,6 +481,89 @@ python extrarrfin.py download
 # Force re-download
 python extrarrfin.py download --limit "Series Name" --force
 ```
+
+### Scenario 5: Jellyfin integration
+
+```bash
+# Download with automatic Jellyfin library refresh
+python extrarrfin.py download --jellyfin-url http://localhost:8096 --jellyfin-api-key YOUR_KEY
+
+# Or configure in config.yaml and run normally
+python extrarrfin.py download
+```
+
+## 📺 Jellyfin Integration
+
+ExtrarrFin can automatically refresh your Jellyfin library after downloading new episodes, ensuring your media server immediately recognizes new content without manual intervention.
+
+### Configuration
+
+Add Jellyfin credentials to your `config.yaml`:
+
+```yaml
+# Jellyfin server URL
+jellyfin_url: "http://localhost:8096"
+
+# Jellyfin API key (generated in Dashboard → API Keys)
+jellyfin_api_key: "your_jellyfin_api_key_here"
+```
+
+Or use environment variables:
+
+```bash
+export JELLYFIN_URL="http://localhost:8096"
+export JELLYFIN_API_KEY="your_jellyfin_api_key_here"
+```
+
+Or pass as command-line arguments:
+
+```bash
+python extrarrfin.py download --jellyfin-url http://localhost:8096 --jellyfin-api-key YOUR_KEY
+```
+
+### How it works
+
+1. **Automatic refresh**: After successfully downloading episodes, ExtrarrFin triggers a full library scan
+2. **Smart behavior**: 
+   - Refresh only happens when at least one episode is successfully downloaded
+   - Skipped in dry-run mode to avoid unnecessary scans
+   - Falls back gracefully if Jellyfin is not configured or unreachable
+3. **Test connectivity**: Use `python extrarrfin.py test` to verify your Jellyfin connection
+
+### Getting your Jellyfin API Key
+
+1. Open your Jellyfin web interface
+2. Go to **Dashboard** → **API Keys**
+3. Click **+** to create a new API key
+4. Give it a name (e.g., "ExtrarrFin")
+5. Copy the generated key and add it to your configuration
+
+### Example output
+
+```
+Processing: Breaking Bad
+  ...
+  ✓ Downloaded: Breaking Bad - S00E01 - Pilot.mp4
+  ✓ Downloaded: Breaking Bad - S00E02 - Inside Breaking Bad.mp4
+
+Refreshing Jellyfin library...
+✓ Jellyfin library refresh triggered
+
+Summary:
+  Total: 2
+  Success: 2
+  Failed: 0
+```
+
+### Troubleshooting
+
+If Jellyfin refresh fails:
+- Verify your Jellyfin URL is accessible
+- Check that your API key is valid
+- Ensure Jellyfin is running and responsive
+- Run `python extrarrfin.py test` to diagnose connection issues
+
+**Note**: Jellyfin integration is completely optional. If not configured, ExtrarrFin will work normally without library refresh functionality.
 
 ## 📁 File structure
 
@@ -868,6 +980,8 @@ services:
     environment:
       - SONARR_URL=http://sonarr:8989
       - SONARR_API_KEY=your_api_key_here
+      - JELLYFIN_URL=http://jellyfin:8096
+      - JELLYFIN_API_KEY=your_jellyfin_api_key_here
       - MEDIA_DIRECTORY=/media
       - SONARR_DIRECTORY=/media
       # Subtitle configuration (optional)
@@ -906,6 +1020,8 @@ You can override config with environment variables:
 docker run --rm \
   -e SONARR_URL=http://sonarr:8989 \
   -e SONARR_API_KEY=your_key \
+  -e JELLYFIN_URL=http://jellyfin:8096 \
+  -e JELLYFIN_API_KEY=your_jellyfin_key \
   -e MEDIA_DIRECTORY=/media \
   -e SUBTITLE_LANGUAGES=fr,en,es \
   -e DOWNLOAD_ALL_SUBTITLES=false \
@@ -917,6 +1033,8 @@ docker run --rm \
 Available environment variables:
 - `SONARR_URL`: Sonarr instance URL
 - `SONARR_API_KEY`: Sonarr API key
+- `JELLYFIN_URL`: Jellyfin server URL (optional)
+- `JELLYFIN_API_KEY`: Jellyfin API key (optional)
 - `MEDIA_DIRECTORY`: Path to media directory
 - `SONARR_DIRECTORY`: Sonarr root directory path
 - `SUBTITLE_LANGUAGES`: Comma-separated language codes (e.g., `fr,en,de,es`)

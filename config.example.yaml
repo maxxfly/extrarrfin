@@ -24,6 +24,18 @@ max_results: 1
 # Log level (DEBUG, INFO, WARNING, ERROR)
 log_level: "INFO"
 
+# Mode de fonctionnement (season0, tag, ou les deux)
+# season0: Télécharge les épisodes spéciaux (Season 0) monitored dans Sonarr
+#          Enregistre dans le dossier "Specials"
+# tag: Télécharge des vidéos "behind the scenes" pour les séries avec le tag "want-extras"
+#      Enregistre dans le dossier "extras" au sein de la série
+#      Cherche sur YouTube: "nom de la série - behind the scenes"
+# Exemples:
+#   mode: "season0"           # Mode season0 uniquement
+#   mode: "tag"               # Mode tag uniquement
+#   mode: ["season0", "tag"]  # Les deux modes (exécute season0 ET tag)
+mode: "season0"
+
 # Schedule mode configuration
 # Enable schedule mode to run downloads automatically
 schedule_enabled: false
@@ -33,6 +45,11 @@ schedule_interval: 1
 
 # Schedule unit (seconds, minutes, hours, days, weeks)
 schedule_unit: "hours"
+
+# Jellyfin integration (optional)
+# If configured, will trigger a library refresh after successful downloads
+# jellyfin_url: "http://localhost:8096"
+# jellyfin_api_key: "your_jellyfin_api_key_here"
 
 # Subtitle configuration
 # Languages to download (in order of priority)
