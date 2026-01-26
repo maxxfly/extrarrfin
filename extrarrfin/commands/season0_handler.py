@@ -5,6 +5,7 @@ Season 0 mode handler - Download monitored season 0 episodes
 import logging
 
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from extrarrfin.config import Config
 from extrarrfin.downloader import Downloader
@@ -17,6 +18,98 @@ console = Console()
 
 
 def download_season0_mode(
+    config: Config,
+    sonarr: SonarrClient,
+    downloader: Downloader,
+    limit: str = None,
+    episode: int = None,
+    dry_run: bool = False,
+    force: bool = False,
+    no_scan: bool = False,
+    verbose: bool = False,
+):
+    """
+    Download monitored season 0 episodes
+
+    Args:
+        config: Configuration object
+        sonarr: Sonarr client
+        downloader: Downloader instance
+        limit: Optional series name or ID to limit downloads
+        episode: Specific episode number to download (None = all)
+        dry_run: If True, don't actually download
+        force: If True, re-download even if file exists
+        no_scan: If True, don't trigger Sonarr scan
+        verbose: If True, show detailed info
+
+    Returns:
+        Tuple of (total_downloads, successful_downloads, failed_downloads)
+    """
+    total_downloads = 0
+    successful_downloads = 0
+    failed_downloads = 0
+
+    # Fetch series
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Fetching series...", total=None)
+        series_list = sonarr.get_monitored_series()
+        progress.update(task, completed=True)
+
+    # Filter to keep only those with monitored season 0 episodes
+    series_with_season0 = [
+        s for s in series_list if sonarr.has_monitored_season_zero_episodes(s)
+    ]
+
+    # Filter by name/ID if specified
+    if limit:
+        if limit.isdigit():
+            series_with_season0 = [s for s in series_with_season0 if s.id == int(limit)]
+        else:
+            series_with_season0 = [
+                s for s in series_with_season0 if limit.lower() in s.title.lower()
+            ]
+
+    if not series_with_season0:
+        console.print("[yellow]No series found[/yellow]")
+        return total_downloads, successful_downloads, failed_downloads
+
+    # Validation: episode option requires limit
+    if episode is not None and not limit:
+        console.print(
+            "[red]Error:[/red] --episode requires --limit to specify a series"
+        )
+        console.print(
+            "[dim]Example: python extrarrfin.py download --limit 'Series Name' --episode 5[/dim]"
+        )
+        return total_downloads, successful_downloads, failed_downloads
+
+    # Process each series
+    for series in series_with_season0:
+        console.print(f"\n[bold cyan]Processing:[/bold cyan] {series.title}")
+
+        t, s, f = _download_series_season0(
+            series,
+            config,
+            sonarr,
+            downloader,
+            episode,
+            dry_run,
+            force,
+            no_scan,
+            verbose,
+        )
+        total_downloads += t
+        successful_downloads += s
+        failed_downloads += f
+
+    return total_downloads, successful_downloads, failed_downloads
+
+
+def _download_series_season0(
     series: Series,
     config: Config,
     sonarr: SonarrClient,
@@ -28,7 +121,7 @@ def download_season0_mode(
     verbose: bool = False,
 ):
     """
-    Download monitored season 0 episodes for a series
+    Download monitored season 0 episodes for a single series
 
     Args:
         series: The series to process
