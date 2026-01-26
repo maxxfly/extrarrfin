@@ -115,7 +115,7 @@ def list_command(
             try:
                 episodes = sonarr.get_season_zero_episodes(series.id)
                 monitored_episodes = [e for e in episodes if e.monitored]
-                
+
                 output_dir = downloader.get_series_directory(
                     series, config.media_directory, config.sonarr_directory
                 )
@@ -126,17 +126,17 @@ def list_command(
                 # Count files by actually scanning the directory
                 for ep in monitored_episodes:
                     file_info = downloader.get_episode_file_info(series, ep, output_dir)
-                    
+
                     # Check if episode has a file
                     if file_info["has_video"] or file_info["has_strm"]:
                         downloaded_count += 1
-                        
+
                         # Add video file size
                         if file_info["video_file"]:
                             video_path = output_dir / file_info["video_file"]
                             if video_path.exists():
                                 series_size += video_path.stat().st_size
-                        
+
                         # Add STRM file size (tiny but for completeness)
                         if file_info["strm_file"]:
                             strm_path = output_dir / file_info["strm_file"]
@@ -149,15 +149,17 @@ def list_command(
                     # Count subtitles for this episode
                     for lang, srt_files in file_info["subtitles"].items():
                         # Count all subtitle files for this language
-                        subtitle_by_lang[lang] = subtitle_by_lang.get(lang, 0) + len(srt_files)
-                        
+                        subtitle_by_lang[lang] = subtitle_by_lang.get(lang, 0) + len(
+                            srt_files
+                        )
+
                         # Add sizes and track files
                         for srt_filename in srt_files:
                             counted_srt_files.add(srt_filename)
                             srt_path = output_dir / srt_filename
                             if srt_path.exists():
                                 series_size += srt_path.stat().st_size
-                
+
                 # Also scan ALL .srt files in the directory (including non-monitored episodes)
                 # to give a complete picture of what's actually on disk
                 try:
@@ -165,7 +167,7 @@ def list_command(
                     for srt_file in all_srt_files:
                         if not srt_file.is_file() or srt_file.name in counted_srt_files:
                             continue
-                        
+
                         # This is a subtitle for a non-monitored episode
                         parts = srt_file.stem.split(".")
                         if len(parts) >= 2:
@@ -174,11 +176,13 @@ def list_command(
                                 lang = parts[-2]
                         else:
                             lang = "unknown"
-                        
+
                         subtitle_by_lang[lang] = subtitle_by_lang.get(lang, 0) + 1
                         series_size += srt_file.stat().st_size
                 except Exception as e:
-                    logger.warning(f"Error scanning all srt files for {series.title}: {e}")
+                    logger.warning(
+                        f"Error scanning all srt files for {series.title}: {e}"
+                    )
             except Exception as e:
                 logger.warning(f"Error processing season0 for {series.title}: {e}")
 
@@ -193,14 +197,21 @@ def list_command(
                     for file in extras_dir.iterdir():
                         if not file.is_file():
                             continue
-                            
+
                         file_size = file.stat().st_size
-                        
-                        if file.suffix.lower() in {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm"}:
+
+                        if file.suffix.lower() in {
+                            ".mp4",
+                            ".mkv",
+                            ".avi",
+                            ".mov",
+                            ".wmv",
+                            ".webm",
+                        }:
                             # Video file in extras
                             downloaded_count += 1
                             series_size += file_size
-                            
+
                         elif file.suffix.lower() == ".srt":
                             # Subtitle in extras
                             series_size += file_size
@@ -209,7 +220,9 @@ def list_command(
                                 lang = parts[-1]
                                 if lang == "forced" and len(parts) >= 3:
                                     lang = parts[-2]
-                                subtitle_by_lang[lang] = subtitle_by_lang.get(lang, 0) + 1
+                                subtitle_by_lang[lang] = (
+                                    subtitle_by_lang.get(lang, 0) + 1
+                                )
             except Exception as e:
                 logger.warning(f"Error processing extras for {series.title}: {e}")
 
@@ -217,7 +230,9 @@ def list_command(
 
         # Format subtitle info
         if subtitle_by_lang:
-            parts = [f"{count} {lang}" for lang, count in sorted(subtitle_by_lang.items())]
+            parts = [
+                f"{count} {lang}" for lang, count in sorted(subtitle_by_lang.items())
+            ]
             srt_info = ", ".join(parts)
         else:
             srt_info = "0"

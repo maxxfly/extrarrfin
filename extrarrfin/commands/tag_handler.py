@@ -204,18 +204,26 @@ def _download_series_extras(
                 # Create .nfo file with video metadata
                 nfo_path = output_dir / f"{base_filename}.nfo"
                 with open(nfo_path, "w", encoding="utf-8") as nfo:
-                    nfo.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
+                    nfo.write(
+                        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+                    )
                     nfo.write("<movie>\n")
                     nfo.write(f"  <title>{video_info['title']}</title>\n")
-                    nfo.write(f"  <originaltitle>{video_info['title']}</originaltitle>\n")
+                    nfo.write(
+                        f"  <originaltitle>{video_info['title']}</originaltitle>\n"
+                    )
                     nfo.write(f"  <plot>{video_info.get('description', '')}</plot>\n")
                     nfo.write(f"  <studio>{video_info.get('channel', '')}</studio>\n")
-                    nfo.write(f"  <director>{video_info.get('uploader', '')}</director>\n")
+                    nfo.write(
+                        f"  <director>{video_info.get('uploader', '')}</director>\n"
+                    )
                     nfo.write(f"  <source>YouTube</source>\n")
                     nfo.write(f"  <id>{video_info['id']}</id>\n")
                     nfo.write(f"  <youtubeurl>{video_info['url']}</youtubeurl>\n")
                     if video_info.get("duration"):
-                        nfo.write(f"  <runtime>{video_info['duration'] // 60}</runtime>\n")
+                        nfo.write(
+                            f"  <runtime>{video_info['duration'] // 60}</runtime>\n"
+                        )
                     nfo.write("</movie>\n")
 
                 console.print(f"    [green]✓ Downloaded {video_title}[/green]")
@@ -226,7 +234,7 @@ def _download_series_extras(
             except Exception as e:
                 last_error = e
                 error_str = str(e).lower()
-                
+
                 # Check if it's a 403 error
                 if "403" in error_str or "forbidden" in error_str:
                     if attempt < max_retries - 1:  # Not the last attempt
@@ -236,7 +244,9 @@ def _download_series_extras(
                         time.sleep(retry_delay)
                         continue
                     else:
-                        console.print(f"    [red]✗ Failed after {max_retries} attempts:[/red] {e}")
+                        console.print(
+                            f"    [red]✗ Failed after {max_retries} attempts:[/red] {e}"
+                        )
                 else:
                     # Not a 403 error, don't retry
                     console.print(f"    [red]✗ Failed:[/red] {e}")
