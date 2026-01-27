@@ -21,6 +21,15 @@ yt_dlp_format: "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
 # Maximum number of YouTube results to consider
 max_results: 1
 
+# Number of YouTube search results to analyze for scoring
+# Higher values find better matches but slower (default: 10)
+youtube_search_results: 10
+
+# Minimum score required to accept a YouTube video match
+# Videos below this threshold will be skipped (default: 50.0)
+# Increase if getting wrong videos, decrease if missing valid ones
+min_score: 50.0
+
 # Log level (DEBUG, INFO, WARNING, ERROR)
 log_level: "INFO"
 
