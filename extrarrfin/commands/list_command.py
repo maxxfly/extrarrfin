@@ -108,9 +108,12 @@ def list_command(
         missing_count = 0
         subtitle_by_lang: dict[str, int] = {}
         series_size = 0
+        # Track if we processed season0 (where missing count is meaningful)
+        processed_season0 = False
 
         # Process Season 0 episodes if applicable
         if has_season0 and "season0" in active_modes:
+            processed_season0 = True
             try:
                 episodes = sonarr.get_season_zero_episodes(series.id)
                 monitored_episodes = [e for e in episodes if e.monitored]
@@ -249,8 +252,12 @@ def list_command(
         else:
             size_str = "-"
 
-        # Show missing count or dash
-        missing_str = str(missing_count) if missing_count > 0 else "-"
+        # Show missing count: only meaningful for season0 mode
+        # For tag-only mode, show "-" since we can't know how many extras should exist
+        if processed_season0:
+            missing_str = str(missing_count)
+        else:
+            missing_str = "-"
 
         table.add_row(
             str(series.id),

@@ -5,12 +5,14 @@ Download module via yt-dlp with Jellyfin formatting
 import logging
 import math
 import re
+import time
 from pathlib import Path
 from typing import Tuple
 
 import yt_dlp
 
 from .models import Episode, Series
+from .scorer import ScoringWeights, VideoScorer
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,7 @@ class Downloader:
         verbose: bool = False,
         min_score: float = 50.0,
         youtube_search_results: int = 10,
+        scoring_weights: ScoringWeights | None = None,
     ):
         self.format_string = format_string
         self.subtitle_languages = subtitle_languages or [
@@ -39,10 +42,16 @@ class Downloader:
         self.download_all_subtitles = download_all_subtitles
         self.use_strm_files = use_strm_files
         self.verbose = verbose
-        self.min_score = min_score  # Minimum score to accept a video match
         self.youtube_search_results = max(
             3, min(20, youtube_search_results)
         )  # Clamp between 3 and 20
+        
+        # Initialize video scorer with custom weights if provided
+        self.scorer = VideoScorer(
+            weights=scoring_weights,
+            min_score=min_score,
+            verbose=verbose,
+        )
 
     @staticmethod
     def _escape_xml(text: str) -> str:
@@ -212,7 +221,7 @@ class Downloader:
 
                     if result and "entries" in result and result["entries"]:
                         # Score each result to find the best match
-                        best_video = self._score_and_select_video(
+                        best_video = self.scorer.score_and_select_video(
                             result["entries"], series, episode.title
                         )
 
@@ -257,7 +266,7 @@ class Downloader:
 
                     if result and "entries" in result and result["entries"]:
                         # Score each result to find the best match
-                        best_video = self._score_and_select_video(
+                        best_video = self.scorer.score_and_select_video(
                             result["entries"], series, episode.title
                         )
 
@@ -1015,14 +1024,14 @@ class Downloader:
             best_score = best.get("_score", 0)
 
             # Check if best video meets minimum score threshold
-            if best_score < self.min_score:
+            if best_score < self.scorer.min_score:
                 if self.verbose:
                     logger.info(
-                        f"[VERBOSE] ✗ Best video score ({best_score:.2f}) is below minimum threshold ({self.min_score})"
+                        f"[VERBOSE] ✗ Best video score ({best_score:.2f}) is below minimum threshold ({self.scorer.min_score})"
                     )
                     logger.info(f"[VERBOSE] ✗ Rejected: {best.get('title')}")
                 logger.warning(
-                    f"No video found with acceptable score (best: {best_score:.2f}, minimum: {self.min_score})"
+                    f"No video found with acceptable score (best: {best_score:.2f}, minimum: {self.scorer.min_score})"
                 )
                 return None
 
