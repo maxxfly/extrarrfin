@@ -3,7 +3,9 @@ Download module via yt-dlp with Jellyfin formatting
 """
 
 import logging
+import math
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Tuple
 
@@ -24,7 +26,8 @@ class Downloader:
         download_all_subtitles: bool = False,
         use_strm_files: bool = False,
         verbose: bool = False,
-        min_score: float = 30.0,
+        min_score: float = 50.0,
+        youtube_search_results: int = 10,
     ):
         self.format_string = format_string
         self.subtitle_languages = subtitle_languages or [
@@ -38,6 +41,9 @@ class Downloader:
         self.use_strm_files = use_strm_files
         self.verbose = verbose
         self.min_score = min_score  # Minimum score to accept a video match
+        self.youtube_search_results = max(
+            3, min(20, youtube_search_results)
+        )  # Clamp between 3 and 20
 
     @staticmethod
     def _escape_xml(text: str) -> str:
@@ -180,8 +186,8 @@ class Downloader:
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
-            "extract_flat": True,
-            "default_search": "ytsearch5",  # Get top 5 results for better matching
+            "extract_flat": "in_playlist",  # Get metadata for each video
+            "default_search": f"ytsearch{self.youtube_search_results}",
             "sleep_requests": 1,  # Sleep 1 second between requests to avoid 429 errors
         }
 
@@ -197,7 +203,9 @@ class Downloader:
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    search_url = f"ytsearch5:{query_with_series}"
+                    search_url = (
+                        f"ytsearch{self.youtube_search_results}:{query_with_series}"
+                    )
                     if self.verbose:
                         logger.info(f"[VERBOSE] Full search URL: {search_url}")
 
@@ -240,7 +248,9 @@ class Downloader:
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    search_url = f"ytsearch5:{query_episode_only}"
+                    search_url = (
+                        f"ytsearch{self.youtube_search_results}:{query_episode_only}"
+                    )
                     if self.verbose:
                         logger.info(f"[VERBOSE] Full search URL: {search_url}")
 
@@ -710,7 +720,7 @@ class Downloader:
         self, videos: list, series: Series, episode_title: str
     ) -> dict | None:
         """
-        Score video results based on title matching and select the best one
+        Score video results based on multiple factors and select the best one
 
         Scoring factors:
         - Exact title match: +100 points
@@ -719,7 +729,18 @@ class Downloader:
         - Word match ratio: +40 points max
         - Contains series title: +30 points
         - Shorter title (less extra content): +20 points max
-        - Official/verified channel indicators: +10 points
+        - Official/verified channel indicators: +15 points
+        - View count bonus: +10 points max (logarithmic)
+        - Description contains series/episode: +15 points
+        - Upload date near series year: +20 points max
+
+        Penalties:
+        - Video game content: -150 points
+        - Old year in title: -100 points
+        - Video uploaded before series: -120 points
+        - Content before series name: -80 points
+        - Too short (<1min) or too long (>90min): -50 points
+        - Compilation/playlist: -30 points
 
         Returns the video with the highest score
         """
@@ -733,9 +754,13 @@ class Downloader:
         episode_lower = episode_title.lower()
         search_words = set((series.title + " " + episode_title).lower().split())
         network_lower = series.network.lower() if series.network else None
+        series_year = series.year  # Year the series started
 
-        if self.verbose and network_lower:
-            logger.info(f"[VERBOSE] Series network: {series.network}")
+        if self.verbose:
+            if network_lower:
+                logger.info(f"[VERBOSE] Series network: {series.network}")
+            if series_year:
+                logger.info(f"[VERBOSE] Series year: {series_year}")
 
         for video in videos:
             if not video:
@@ -745,7 +770,14 @@ class Downloader:
             title_lower = title.lower()
             channel = video.get("channel", "")
             channel_lower = channel.lower()
+            description = video.get("description", "") or ""
+            description_lower = description.lower()
+            duration = video.get("duration")  # Duration in seconds
+            view_count = video.get("view_count")
+            upload_date = video.get("upload_date")  # Format: YYYYMMDD
             score = 0
+
+            # ===== POSITIVE SCORING =====
 
             # Exact match (very rare but best case)
             if (
@@ -786,24 +818,77 @@ class Downloader:
             if series_lower in title_lower:
                 score += 30
 
-            # Word matching ratio
-            title_words = set(title_lower.split())
-            common_words = search_words & title_words
-            if search_words:
-                word_ratio = len(common_words) / len(search_words)
-                score += word_ratio * 40
-
             # Prefer shorter titles (less likely to be compilations or unrelated content)
             title_length = len(title)
             if title_length < 100:
                 score += 20 * (1 - title_length / 100)
 
-            # Check for official/quality indicators
-            title_and_channel = (title + " " + video.get("channel", "")).lower()
+            # [IMPROVEMENT #2] Check for official/verified channel indicators
+            title_and_channel = (title + " " + channel).lower()
             if any(
                 word in title_and_channel for word in ["official", "vevo", "verified"]
             ):
-                score += 10
+                score += 15
+                if self.verbose:
+                    logger.info(f"[VERBOSE] Official/verified channel bonus: +15")
+
+            # [IMPROVEMENT #4] View count bonus (logarithmic scale)
+            # Videos with more views are more likely to be legitimate content
+            if view_count and view_count > 0:
+                # log10(1000) = 3, log10(1M) = 6, log10(100M) = 8
+                # Scale: 0-10 points based on views (1K to 100M range)
+                view_score = min(10, max(0, (math.log10(view_count) - 3) * 2))
+                score += view_score
+                if self.verbose and view_score > 2:
+                    logger.info(
+                        f"[VERBOSE] View count bonus: +{view_score:.1f} ({view_count:,} views)"
+                    )
+
+            # [IMPROVEMENT #5] Description analysis
+            # Check if description contains relevant keywords
+            if description_lower:
+                desc_bonus = 0
+                if series_lower in description_lower:
+                    desc_bonus += 8
+                if episode_lower in description_lower:
+                    desc_bonus += 7
+                # Check for official content indicators in description
+                if any(
+                    word in description_lower
+                    for word in [
+                        "official",
+                        "©",
+                        "all rights reserved",
+                        network_lower or "",
+                    ]
+                    if word
+                ):
+                    desc_bonus += 5
+                if desc_bonus > 0:
+                    score += min(15, desc_bonus)  # Cap at 15 points
+                    if self.verbose:
+                        logger.info(
+                            f"[VERBOSE] Description match bonus: +{min(15, desc_bonus)}"
+                        )
+
+            # [IMPROVEMENT #3] Upload date near series year bonus
+            if upload_date and series_year:
+                try:
+                    upload_year = int(upload_date[:4])
+                    year_diff = abs(upload_year - series_year)
+                    # Bonus for videos uploaded within 5 years of series start
+                    # Full bonus (20) if same year, decreasing to 0 at 5+ years difference
+                    if year_diff <= 5:
+                        year_bonus = 20 * (1 - year_diff / 5)
+                        score += year_bonus
+                        if self.verbose and year_bonus > 5:
+                            logger.info(
+                                f"[VERBOSE] Upload year proximity bonus: +{year_bonus:.1f} (uploaded {upload_year})"
+                            )
+                except (ValueError, TypeError):
+                    pass  # Invalid date format
+
+            # ===== PENALTIES =====
 
             # Penalize certain patterns that indicate wrong content
             if any(
@@ -812,8 +897,22 @@ class Downloader:
             ):
                 score -= 30
 
+            # [IMPROVEMENT #1] Duration penalty - too short or too long
+            if duration:
+                if duration < 60:  # Less than 1 minute - probably a trailer/teaser
+                    score -= 50
+                    if self.verbose:
+                        logger.info(
+                            f"[VERBOSE] Duration penalty: -50 (too short: {duration}s)"
+                        )
+                elif duration > 5400:  # More than 90 minutes - probably a compilation
+                    score -= 50
+                    if self.verbose:
+                        logger.info(
+                            f"[VERBOSE] Duration penalty: -50 (too long: {duration // 60}min)"
+                        )
+
             # STRONG PENALTY: Video game content - not official series content
-            # Games like Juno New Origins, Kerbal Space Program, etc. where people recreate scenes
             video_game_indicators = [
                 "juno new origins",
                 "juno",
@@ -832,32 +931,44 @@ class Downloader:
                 "video game",
             ]
             if any(indicator in title_lower for indicator in video_game_indicators):
-                score -= 150  # Very strong penalty for game content
+                score -= 150
                 if self.verbose:
                     logger.info(
                         f"[VERBOSE] Very strong penalty: Video game/gameplay content detected"
                     )
 
             # PENALTY: Detect old year in parentheses (e.g., "(1978)") - likely wrong content
-            # Series episode titles shouldn't have old years like (1978), (1985), etc.
             old_year_match = re.search(r"\(19\d{2}\)", title)
             if old_year_match:
-                score -= 100  # Strong penalty for old year in parentheses
+                score -= 100
                 if self.verbose:
                     logger.info(
                         f"[VERBOSE] Strong penalty: Old year {old_year_match.group()} in title"
                     )
 
+            # [IMPROVEMENT #9] Video uploaded BEFORE series started - very suspicious
+            if upload_date and series_year:
+                try:
+                    upload_year = int(upload_date[:4])
+                    if upload_year < series_year - 1:
+                        # Video uploaded before series even existed
+                        years_before = series_year - upload_year
+                        penalty = min(120, years_before * 20)
+                        score -= penalty
+                        if self.verbose:
+                            logger.info(
+                                f"[VERBOSE] Strong penalty: Video from {upload_year}, series started {series_year} (-{penalty})"
+                            )
+                except (ValueError, TypeError):
+                    pass
+
             # PENALTY: Detect if another title appears BEFORE the series name
-            # This catches cases like "Space Sweeps Hollywood - For All Mankind" where "Space Sweeps Hollywood" is the actual content
             if series_lower in title_lower:
                 series_position = title_lower.find(series_lower)
                 title_before_series = title_lower[:series_position].strip()
 
-                # Check if there's substantial content before the series name (more than 3 words)
                 if title_before_series:
                     words_before = title_before_series.split()
-                    # Filter out common connecting words
                     significant_words = [
                         w
                         for w in words_before

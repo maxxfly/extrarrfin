@@ -124,5 +124,6 @@ def setup_context(
             download_all_subtitles=config.download_all_subtitles,
             use_strm_files=config.use_strm_files,
             min_score=config.min_score,
+            youtube_search_results=config.youtube_search_results,
         ),
     }
