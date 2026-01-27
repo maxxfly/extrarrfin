@@ -45,7 +45,7 @@ class Downloader:
         self.youtube_search_results = max(
             3, min(20, youtube_search_results)
         )  # Clamp between 3 and 20
-        
+
         # Initialize video scorer with custom weights if provided
         self.scorer = VideoScorer(
             weights=scoring_weights,

@@ -47,7 +47,7 @@ class ScoringWeights:
 class VideoScorer:
     """
     Scores YouTube video results based on relevance to episode
-    
+
     Uses multiple factors including:
     - Title matching (exact, partial, word ratio)
     - Channel/network matching
@@ -86,7 +86,7 @@ class VideoScorer:
             return None
 
         scored_videos = []
-        
+
         # Normalize strings for comparison
         series_lower = series.title.lower()
         episode_lower = episode_title.lower()
@@ -105,15 +105,22 @@ class VideoScorer:
                 continue
 
             score = self._score_video(
-                video, series_lower, episode_lower, search_words, network_lower, series_year
+                video,
+                series_lower,
+                episode_lower,
+                search_words,
+                network_lower,
+                series_year,
             )
-            
+
             video["_score"] = score
             scored_videos.append(video)
 
             if self.verbose:
                 title = video.get("title", "")
-                logger.info(f"[VERBOSE] Candidate: {title[:60]}... (score: {score:.2f})")
+                logger.info(
+                    f"[VERBOSE] Candidate: {title[:60]}... (score: {score:.2f})"
+                )
 
         return self._select_best_video(scored_videos)
 
@@ -127,7 +134,7 @@ class VideoScorer:
         series_year: int | None,
     ) -> float:
         """Calculate score for a single video"""
-        
+
         title = video.get("title", "")
         title_lower = title.lower()
         channel = video.get("channel", "")
@@ -138,14 +145,18 @@ class VideoScorer:
         view_count = video.get("view_count")
         upload_date = video.get("upload_date")
         like_count = video.get("like_count")
-        
+
         score: float = 0
 
         # ===== POSITIVE SCORING =====
-        score += self._score_title_match(title_lower, series_lower, episode_lower, search_words)
+        score += self._score_title_match(
+            title_lower, series_lower, episode_lower, search_words
+        )
         score += self._score_network_match(channel, channel_lower, network_lower)
         score += self._score_engagement(view_count, like_count)
-        score += self._score_description(description_lower, series_lower, episode_lower, network_lower)
+        score += self._score_description(
+            description_lower, series_lower, episode_lower, network_lower
+        )
         score += self._score_upload_date(upload_date, series_year)
 
         # ===== PENALTIES =====
@@ -163,7 +174,10 @@ class VideoScorer:
         score = 0.0
 
         # Exact match
-        if title_lower == episode_lower or title_lower == f"{series_lower} {episode_lower}":
+        if (
+            title_lower == episode_lower
+            or title_lower == f"{series_lower} {episode_lower}"
+        ):
             score += self.weights.exact_match
 
         # Contains episode title
@@ -215,19 +229,22 @@ class VideoScorer:
 
         return 0.0
 
-    def _score_engagement(self, view_count: int | None, like_count: int | None) -> float:
+    def _score_engagement(
+        self, view_count: int | None, like_count: int | None
+    ) -> float:
         """Score based on view count and like ratio"""
         score = 0.0
 
         # View count bonus (logarithmic)
         if view_count and view_count > 0:
             view_score = min(
-                self.weights.view_count_max,
-                max(0, (math.log10(view_count) - 3) * 2)
+                self.weights.view_count_max, max(0, (math.log10(view_count) - 3) * 2)
             )
             score += view_score
             if self.verbose and view_score > 2:
-                logger.info(f"[VERBOSE] View count bonus: +{view_score:.1f} ({view_count:,} views)")
+                logger.info(
+                    f"[VERBOSE] View count bonus: +{view_score:.1f} ({view_count:,} views)"
+                )
 
         # Like ratio bonus
         if (
@@ -248,7 +265,9 @@ class VideoScorer:
             if like_bonus > 0:
                 score += like_bonus
                 if self.verbose:
-                    logger.info(f"[VERBOSE] Like ratio bonus: +{like_bonus:.1f} ({like_ratio:.1%})")
+                    logger.info(
+                        f"[VERBOSE] Like ratio bonus: +{like_bonus:.1f} ({like_ratio:.1%})"
+                    )
 
         return score
 
@@ -268,12 +287,12 @@ class VideoScorer:
             desc_bonus += 8
         if episode_lower in description_lower:
             desc_bonus += 7
-        
+
         # Official content indicators
         official_indicators = ["official", "©", "all rights reserved"]
         if network_lower:
             official_indicators.append(network_lower)
-        
+
         if any(ind in description_lower for ind in official_indicators):
             desc_bonus += 5
 
@@ -285,7 +304,9 @@ class VideoScorer:
 
         return 0.0
 
-    def _score_upload_date(self, upload_date: str | None, series_year: int | None) -> float:
+    def _score_upload_date(
+        self, upload_date: str | None, series_year: int | None
+    ) -> float:
         """Score based on upload date proximity to series year"""
         if not upload_date or not series_year:
             return 0.0
@@ -293,12 +314,16 @@ class VideoScorer:
         try:
             upload_year = int(upload_date[:4])
             year_diff = abs(upload_year - series_year)
-            
+
             # Bonus for videos within 5 years of series start
             if year_diff <= 5:
-                year_bonus = self.weights.upload_date_proximity_max * (1 - year_diff / 5)
+                year_bonus = self.weights.upload_date_proximity_max * (
+                    1 - year_diff / 5
+                )
                 if self.verbose and year_bonus > 5:
-                    logger.info(f"[VERBOSE] Upload proximity bonus: +{year_bonus:.1f} (uploaded {upload_year})")
+                    logger.info(
+                        f"[VERBOSE] Upload proximity bonus: +{year_bonus:.1f} (uploaded {upload_year})"
+                    )
                 return year_bonus
         except (ValueError, TypeError):
             pass
@@ -314,10 +339,12 @@ class VideoScorer:
             if self.verbose:
                 logger.info(f"[VERBOSE] Duration penalty: too short ({duration}s)")
             return self.weights.duration_invalid
-        
+
         if duration > self.weights.max_duration:
             if self.verbose:
-                logger.info(f"[VERBOSE] Duration penalty: too long ({duration // 60}min)")
+                logger.info(
+                    f"[VERBOSE] Duration penalty: too long ({duration // 60}min)"
+                )
             return self.weights.duration_invalid
 
         return 0.0
@@ -327,15 +354,29 @@ class VideoScorer:
         penalty = 0.0
 
         # Compilation/playlist indicators
-        if any(word in title_lower for word in ["compilation", "playlist", "all episodes", "full series"]):
+        if any(
+            word in title_lower
+            for word in ["compilation", "playlist", "all episodes", "full series"]
+        ):
             penalty += self.weights.compilation_penalty
 
         # Video game content
         video_game_indicators = [
-            "juno new origins", "juno", "kerbal space program", "ksp",
-            "gameplay", "game play", "let's play", "walkthrough",
-            "gaming", "simulator", "sim", "mod", "modded",
-            "pc game", "video game"
+            "juno new origins",
+            "juno",
+            "kerbal space program",
+            "ksp",
+            "gameplay",
+            "game play",
+            "let's play",
+            "walkthrough",
+            "gaming",
+            "simulator",
+            "sim",
+            "mod",
+            "modded",
+            "pc game",
+            "video game",
         ]
         if any(indicator in title_lower for indicator in video_game_indicators):
             if self.verbose:
@@ -363,16 +404,22 @@ class VideoScorer:
                 upload_year = int(upload_date[:4])
                 if upload_year < series_year - 1:
                     years_before = series_year - upload_year
-                    year_penalty = min(self.weights.uploaded_before_series, years_before * 20)
+                    year_penalty = min(
+                        self.weights.uploaded_before_series, years_before * 20
+                    )
                     if self.verbose:
-                        logger.info(f"[VERBOSE] Uploaded before series penalty: -{year_penalty}")
+                        logger.info(
+                            f"[VERBOSE] Uploaded before series penalty: -{year_penalty}"
+                        )
                     penalty += year_penalty
             except (ValueError, TypeError):
                 pass
 
         return penalty
 
-    def _penalty_title_position(self, title: str, title_lower: str, series_lower: str) -> float:
+    def _penalty_title_position(
+        self, title: str, title_lower: str, series_lower: str
+    ) -> float:
         """Penalty if another title appears before series name"""
         if series_lower not in title_lower:
             return 0.0
@@ -386,14 +433,15 @@ class VideoScorer:
         # Check for substantial content before series name
         original_before = title[:series_position].strip()
         capitalized_words = sum(
-            1 for word in original_before.split()
-            if word and word[0].isupper()
+            1 for word in original_before.split() if word and word[0].isupper()
         )
 
         # 2+ capitalized words = likely another title
         if capitalized_words >= 2:
             if self.verbose:
-                logger.info(f"[VERBOSE] Content before series penalty: '{original_before}'")
+                logger.info(
+                    f"[VERBOSE] Content before series penalty: '{original_before}'"
+                )
             return self.weights.content_before_series
 
         return 0.0
@@ -419,7 +467,9 @@ class VideoScorer:
             return None
 
         if self.verbose:
-            logger.info(f"[VERBOSE] ✓ Selected: {best.get('title')} (score: {best_score:.2f})")
+            logger.info(
+                f"[VERBOSE] ✓ Selected: {best.get('title')} (score: {best_score:.2f})"
+            )
             logger.info(f"[VERBOSE] ✓ Video ID: {best.get('id')}")
 
         return best
