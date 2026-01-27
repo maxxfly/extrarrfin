@@ -3,7 +3,6 @@ List command - Display series with monitored season 0 or want-extras tag
 """
 
 import logging
-from pathlib import Path
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -21,8 +20,8 @@ def list_command(
     config: Config,
     sonarr: SonarrClient,
     downloader: Downloader,
-    limit: str = None,
-    mode: tuple = None,
+    limit: str | None = None,
+    mode: tuple | None = None,
 ):
     """Execute the list command logic"""
 
@@ -107,7 +106,7 @@ def list_command(
         # Initialize counters
         downloaded_count = 0
         missing_count = 0
-        subtitle_by_lang = {}
+        subtitle_by_lang: dict[str, int] = {}
         series_size = 0
 
         # Process Season 0 episodes if applicable

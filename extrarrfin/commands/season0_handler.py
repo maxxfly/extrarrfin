@@ -21,8 +21,8 @@ def download_season0_mode(
     config: Config,
     sonarr: SonarrClient,
     downloader: Downloader,
-    limit: str = None,
-    episode: int = None,
+    limit: str | None = None,
+    episode: int | None = None,
     dry_run: bool = False,
     force: bool = False,
     no_scan: bool = False,
@@ -114,7 +114,7 @@ def _download_series_season0(
     config: Config,
     sonarr: SonarrClient,
     downloader: Downloader,
-    episode: int = None,
+    episode: int | None = None,
     dry_run: bool = False,
     force: bool = False,
     no_scan: bool = False,
@@ -223,9 +223,9 @@ def _download_series_season0(
     # Trigger Sonarr scan if requested and if some downloads succeeded
     if not dry_run and not no_scan and successful_downloads > 0:
         try:
-            console.print(f"  [blue]Scanning Sonarr...[/blue]")
+            console.print("  [blue]Scanning Sonarr...[/blue]")
             sonarr.rescan_series(series.id)
-            console.print(f"    [green]✓ Scan triggered[/green]")
+            console.print("    [green]✓ Scan triggered[/green]")
         except Exception as e:
             console.print(f"    [red]Scan error:[/red] {e}")
 

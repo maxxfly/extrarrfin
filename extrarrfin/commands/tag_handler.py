@@ -22,7 +22,7 @@ def download_tag_mode(
     config: Config,
     sonarr: SonarrClient,
     downloader: Downloader,
-    limit: str = None,
+    limit: str | None = None,
     dry_run: bool = False,
     force: bool = False,
     no_scan: bool = False,
@@ -129,11 +129,11 @@ def _download_series_extras(
         return total_downloads, successful_downloads, failed_downloads
 
     # Search for behind the scenes videos
-    console.print(f"  [blue]Searching for behind the scenes videos...[/blue]")
+    console.print("  [blue]Searching for behind the scenes videos...[/blue]")
     video_urls = downloader.search_youtube_behind_scenes(series)
 
     if not video_urls:
-        console.print(f"  [yellow]No behind the scenes videos found[/yellow]")
+        console.print("  [yellow]No behind the scenes videos found[/yellow]")
         return total_downloads, successful_downloads, failed_downloads
 
     console.print(f"  [green]Found {len(video_urls)} videos[/green]")
@@ -194,7 +194,6 @@ def _download_series_extras(
         max_retries = 5
         base_delay = 2  # Base delay in seconds
         download_success = False
-        last_error = None
 
         for attempt in range(max_retries):
             try:
@@ -212,7 +211,6 @@ def _download_series_extras(
                 break  # Success, exit retry loop
 
             except Exception as e:
-                last_error = e
                 error_str = str(e).lower()
 
                 # Check if it's a 403 or 429 error (quota/rate limiting)
@@ -245,9 +243,9 @@ def _download_series_extras(
     # Trigger Sonarr scan if requested
     if not dry_run and not no_scan and successful_downloads > 0:
         try:
-            console.print(f"  [blue]Scanning Sonarr...[/blue]")
+            console.print("  [blue]Scanning Sonarr...[/blue]")
             sonarr.rescan_series(series.id)
-            console.print(f"    [green]✓ Scan triggered[/green]")
+            console.print("    [green]✓ Scan triggered[/green]")
         except Exception as e:
             console.print(f"    [red]Scan error:[/red] {e}")
 

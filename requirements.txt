@@ -4,3 +4,5 @@ yt-dlp>=2023.12.30
 PyYAML>=6.0.1
 rich>=13.7.0
 schedule>=1.2.0
+mypy>=1.8.0
+ruff>=0.1.0

@@ -3,7 +3,6 @@ Jellyfin API client for library refresh
 """
 
 import logging
-from typing import Optional
 
 import requests
 

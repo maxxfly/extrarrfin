@@ -30,7 +30,7 @@ def test_command(
         console.print(f"URL: {config.sonarr_url}")
 
         series = sonarr.get_all_series()
-        console.print(f"[green]✓ Connection successful![/green]")
+        console.print("[green]✓ Connection successful![/green]")
         console.print(f"Number of series: {len(series)}")
 
         monitored = [s for s in series if s.monitored]

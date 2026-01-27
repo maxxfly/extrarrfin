@@ -5,7 +5,6 @@ Download module via yt-dlp with Jellyfin formatting
 import logging
 import math
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Tuple
 
@@ -422,9 +421,7 @@ class Downloader:
             title_lower = title.lower()
             channel = video.get("channel", "")
             channel_lower = channel.lower()
-            description = video.get("description", "")
-            description_lower = description.lower() if description else ""
-            score = 0
+            score: float = 0
 
             # Contains behind the scenes / bts / making of (essential for this mode)
             if any(
@@ -448,7 +445,7 @@ class Downloader:
             ):
                 score += 40
                 if self.verbose:
-                    logger.info(f"[VERBOSE] VFX/Breakdown bonus applied")
+                    logger.info("[VERBOSE] VFX/Breakdown bonus applied")
 
             # Contains series title
             if series_lower in title_lower:
@@ -465,7 +462,7 @@ class Downloader:
                 ):
                     score += 15
                     if self.verbose:
-                        logger.info(f"[VERBOSE] Character/actor BTS bonus applied")
+                        logger.info("[VERBOSE] Character/actor BTS bonus applied")
 
             # Bonus if network name appears in title (indicates official content)
             if network_lower and network_lower in title_lower:
@@ -530,7 +527,7 @@ class Downloader:
                 score -= 60
                 if self.verbose:
                     logger.info(
-                        f"[VERBOSE] Penalty: Educational/unrelated content in title"
+                        "[VERBOSE] Penalty: Educational/unrelated content in title"
                     )
 
             # Word matching ratio
@@ -562,7 +559,6 @@ class Downloader:
                 # Check if there's substantial content before the series name
                 # that looks like another title (multiple capitalized words)
                 if title_before_series:
-                    words_before = title_before_series.split()
                     # Count words that start with capital in original title
                     original_before = title[:series_position].strip()
                     capitalized_words = sum(
@@ -613,7 +609,7 @@ class Downloader:
                 if not has_bts:
                     score -= 40
                     if self.verbose:
-                        logger.info(f"[VERBOSE] Penalty: Trailer without BTS content")
+                        logger.info("[VERBOSE] Penalty: Trailer without BTS content")
 
             if self.verbose:
                 logger.info(f"[VERBOSE] Video '{title}' scored {score:.2f} points")
@@ -652,7 +648,7 @@ class Downloader:
         if not videos:
             return []
 
-        unique_videos = []
+        unique_videos: list = []
 
         for video in videos:
             is_duplicate = False
@@ -775,7 +771,7 @@ class Downloader:
             duration = video.get("duration")  # Duration in seconds
             view_count = video.get("view_count")
             upload_date = video.get("upload_date")  # Format: YYYYMMDD
-            score = 0
+            score: float = 0
 
             # ===== POSITIVE SCORING =====
 
@@ -830,7 +826,7 @@ class Downloader:
             ):
                 score += 15
                 if self.verbose:
-                    logger.info(f"[VERBOSE] Official/verified channel bonus: +15")
+                    logger.info("[VERBOSE] Official/verified channel bonus: +15")
 
             # [IMPROVEMENT #4] View count bonus (logarithmic scale)
             # Videos with more views are more likely to be legitimate content
@@ -956,7 +952,7 @@ class Downloader:
                 score -= 150
                 if self.verbose:
                     logger.info(
-                        f"[VERBOSE] Very strong penalty: Video game/gameplay content detected"
+                        "[VERBOSE] Very strong penalty: Video game/gameplay content detected"
                     )
 
             # PENALTY: Detect old year in parentheses (e.g., "(1978)") - likely wrong content
@@ -1283,73 +1279,69 @@ class Downloader:
         else:
             logger.info(f"Downloading from: {youtube_url}")
 
-            # Retry logic with exponential backoff for rate limiting errors
-            max_retries = 5
-            base_delay = 2  # Base delay in seconds
-            last_error = None
+        # Retry logic with exponential backoff for rate limiting errors
+        max_retries = 5
+        base_delay = 2  # Base delay in seconds
+        last_error = None
 
-            for attempt in range(max_retries):
-                try:
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(youtube_url, download=True)
+        for attempt in range(max_retries):
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(youtube_url, download=True)
 
-                        # Find downloaded file
-                        ext = info.get("ext", "mp4")
-                        final_file = output_directory / f"{base_filename}.{ext}"
+                    # Find downloaded file
+                    ext = info.get("ext", "mp4")
+                    final_file = output_directory / f"{base_filename}.{ext}"
 
-                        if final_file.exists():
-                            if self.verbose:
-                                logger.info(
-                                    f"[VERBOSE] Download successful: {final_file}"
-                                )
-                                logger.info(
-                                    f"[VERBOSE] File size: {final_file.stat().st_size / (1024 * 1024):.2f} MB"
-                                )
-                            else:
-                                logger.info(f"Download successful: {final_file}")
-                            return True, str(final_file), None, info
-                        else:
-                            error_msg = "Downloaded file not found"
-                            logger.error(error_msg)
-                            return False, None, error_msg, None
-
-                except Exception as e:
-                    last_error = e
-                    error_str = str(e).lower()
-
-                    # Check if it's a rate limit error (403/429)
-                    if (
-                        "403" in error_str
-                        or "forbidden" in error_str
-                        or "429" in error_str
-                        or "too many" in error_str
-                    ):
-                        if attempt < max_retries - 1:  # Not the last attempt
-                            # Exponential backoff: 2s, 4s, 8s, 16s, 32s
-                            import time
-
-                            delay = base_delay * (2**attempt)
-                            logger.warning(
-                                f"Rate limit error, retrying in {delay}s... (attempt {attempt + 1}/{max_retries})"
+                    if final_file.exists():
+                        if self.verbose:
+                            logger.info(f"[VERBOSE] Download successful: {final_file}")
+                            logger.info(
+                                f"[VERBOSE] File size: {final_file.stat().st_size / (1024 * 1024):.2f} MB"
                             )
-                            time.sleep(delay)
-                            continue
                         else:
-                            error_msg = (
-                                f"Download failed after {max_retries} attempts: {e}"
-                            )
-                            logger.error(error_msg)
-                            return False, None, error_msg, None
+                            logger.info(f"Download successful: {final_file}")
+                        return True, str(final_file), None, info
                     else:
-                        # Not a rate limit error, don't retry
-                        error_msg = f"Download error: {str(e)}"
+                        error_msg = "Downloaded file not found"
                         logger.error(error_msg)
                         return False, None, error_msg, None
 
-            # Should not reach here, but just in case
-            error_msg = f"Download error: {last_error}"
-            logger.error(error_msg)
-            return False, None, error_msg, None
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+
+                # Check if it's a rate limit error (403/429)
+                if (
+                    "403" in error_str
+                    or "forbidden" in error_str
+                    or "429" in error_str
+                    or "too many" in error_str
+                ):
+                    if attempt < max_retries - 1:  # Not the last attempt
+                        # Exponential backoff: 2s, 4s, 8s, 16s, 32s
+                        import time
+
+                        delay = base_delay * (2**attempt)
+                        logger.warning(
+                            f"Rate limit error, retrying in {delay}s... (attempt {attempt + 1}/{max_retries})"
+                        )
+                        time.sleep(delay)
+                        continue
+                    else:
+                        error_msg = f"Download failed after {max_retries} attempts: {e}"
+                        logger.error(error_msg)
+                        return False, None, error_msg, None
+                else:
+                    # Not a rate limit error, don't retry
+                    error_msg = f"Download error: {str(e)}"
+                    logger.error(error_msg)
+                    return False, None, error_msg, None
+
+        # Should not reach here, but just in case
+        error_msg = f"Download error: {last_error}"
+        logger.error(error_msg)
+        return False, None, error_msg, None
 
     def file_exists(
         self, series: Series, episode: Episode, output_directory: Path
@@ -1399,7 +1391,7 @@ class Downloader:
                 nfo.write(f"  <plot>{description}</plot>\n")
                 nfo.write(f"  <studio>{channel}</studio>\n")
                 nfo.write(f"  <director>{uploader}</director>\n")
-                nfo.write(f"  <source>YouTube</source>\n")
+                nfo.write("  <source>YouTube</source>\n")
                 nfo.write(f"  <id>{video_id}</id>\n")
                 nfo.write(f"  <youtubeurl>{video_url}</youtubeurl>\n")
                 if video_info.get("duration"):
