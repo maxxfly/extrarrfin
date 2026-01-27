@@ -844,6 +844,28 @@ class Downloader:
                         f"[VERBOSE] View count bonus: +{view_score:.1f} ({view_count:,} views)"
                     )
 
+            # [IMPROVEMENT #10] Like ratio bonus
+            # Videos with high like/view ratio are more likely to be quality content
+            like_count = video.get("like_count")
+            if like_count and view_count and view_count > 100:
+                like_ratio = like_count / view_count
+                # Typical good ratio is 2-5%, excellent is 5%+
+                # Scale: 0-8 points based on like ratio
+                if like_ratio >= 0.05:  # 5%+ = excellent engagement
+                    like_bonus = 8
+                elif like_ratio >= 0.03:  # 3-5% = good engagement
+                    like_bonus = 5
+                elif like_ratio >= 0.02:  # 2-3% = decent engagement
+                    like_bonus = 3
+                else:
+                    like_bonus = 0
+                if like_bonus > 0:
+                    score += like_bonus
+                    if self.verbose:
+                        logger.info(
+                            f"[VERBOSE] Like ratio bonus: +{like_bonus} ({like_ratio:.1%} likes)"
+                        )
+
             # [IMPROVEMENT #5] Description analysis
             # Check if description contains relevant keywords
             if description_lower:
