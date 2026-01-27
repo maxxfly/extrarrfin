@@ -162,6 +162,10 @@ sonarr_directory: "/tv"
 # yt-dlp download format
 yt_dlp_format: "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
 
+# YouTube search configuration
+youtube_search_results: 10  # Number of results to analyze
+min_score: 50.0             # Minimum score to accept a video match
+
 # Log level
 log_level: "INFO"
 

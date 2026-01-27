@@ -24,6 +24,7 @@ class Downloader:
         download_all_subtitles: bool = False,
         use_strm_files: bool = False,
         verbose: bool = False,
+        min_score: float = 30.0,
     ):
         self.format_string = format_string
         self.subtitle_languages = subtitle_languages or [
@@ -36,6 +37,21 @@ class Downloader:
         self.download_all_subtitles = download_all_subtitles
         self.use_strm_files = use_strm_files
         self.verbose = verbose
+        self.min_score = min_score  # Minimum score to accept a video match
+
+    @staticmethod
+    def _escape_xml(text: str) -> str:
+        """Escape special XML characters to prevent invalid NFO files"""
+        if not text:
+            return ""
+        return (
+            str(text)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&apos;")
+        )
 
     def sanitize_filename(self, filename: str) -> str:
         """Clean a filename to make it compatible"""
@@ -122,6 +138,36 @@ class Downloader:
 
         return extras_dir
 
+    def _clean_episode_title_for_search(self, title: str) -> str:
+        """
+        Clean episode title before YouTube search to improve results
+
+        Removes:
+        - Old years in parentheses like (1978), (1985), etc.
+        - Content that appears to be misplaced movie/show titles
+
+        Args:
+            title: Original episode title from Sonarr
+
+        Returns:
+            Cleaned title suitable for YouTube search
+        """
+        cleaned = title
+
+        # Remove old years in parentheses (19XX)
+        cleaned = re.sub(r"\s*\(19\d{2}\)\s*", " ", cleaned)
+
+        # Remove old years in parentheses (20XX before 2010, likely old content)
+        cleaned = re.sub(r"\s*\(200\d\)\s*", " ", cleaned)
+
+        # Remove extra whitespace
+        cleaned = " ".join(cleaned.split())
+
+        if self.verbose and cleaned != title:
+            logger.info(f"[VERBOSE] Cleaned episode title: '{title}' → '{cleaned}'")
+
+        return cleaned.strip()
+
     def search_youtube(self, series: Series, episode: Episode) -> str | None:
         """
         Search for a video on YouTube with improved matching
@@ -141,7 +187,9 @@ class Downloader:
 
         # First attempt: series title + episode title
         if episode.title and episode.title != "TBA":
-            query_with_series = f"{series.title} {episode.title}"
+            # Clean episode title before search to improve results
+            cleaned_title = self._clean_episode_title_for_search(episode.title)
+            query_with_series = f"{series.title} {cleaned_title}"
             if self.verbose:
                 logger.info(f"[VERBOSE] YouTube search query: '{query_with_series}'")
             else:
@@ -764,6 +812,65 @@ class Downloader:
             ):
                 score -= 30
 
+            # STRONG PENALTY: Video game content - not official series content
+            # Games like Juno New Origins, Kerbal Space Program, etc. where people recreate scenes
+            video_game_indicators = [
+                "juno new origins",
+                "juno",
+                "kerbal space program",
+                "ksp",
+                "gameplay",
+                "game play",
+                "let's play",
+                "walkthrough",
+                "gaming",
+                "simulator",
+                "sim",
+                "mod",
+                "modded",
+                "pc game",
+                "video game",
+            ]
+            if any(indicator in title_lower for indicator in video_game_indicators):
+                score -= 150  # Very strong penalty for game content
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] Very strong penalty: Video game/gameplay content detected"
+                    )
+
+            # PENALTY: Detect old year in parentheses (e.g., "(1978)") - likely wrong content
+            # Series episode titles shouldn't have old years like (1978), (1985), etc.
+            old_year_match = re.search(r"\(19\d{2}\)", title)
+            if old_year_match:
+                score -= 100  # Strong penalty for old year in parentheses
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] Strong penalty: Old year {old_year_match.group()} in title"
+                    )
+
+            # PENALTY: Detect if another title appears BEFORE the series name
+            # This catches cases like "Space Sweeps Hollywood - For All Mankind" where "Space Sweeps Hollywood" is the actual content
+            if series_lower in title_lower:
+                series_position = title_lower.find(series_lower)
+                title_before_series = title_lower[:series_position].strip()
+
+                # Check if there's substantial content before the series name (more than 3 words)
+                if title_before_series:
+                    words_before = title_before_series.split()
+                    # Filter out common connecting words
+                    significant_words = [
+                        w
+                        for w in words_before
+                        if w
+                        not in ["-", "|", ":", "the", "a", "an", "for", "and", "of"]
+                    ]
+                    if len(significant_words) >= 2:
+                        score -= 80
+                        if self.verbose:
+                            logger.info(
+                                f"[VERBOSE] Penalty: Content before series name: '{title_before_series}'"
+                            )
+
             # Store score in video dict
             video["_score"] = score
             scored_videos.append(video)
@@ -773,9 +880,28 @@ class Downloader:
                     f"[VERBOSE] Candidate: {title[:60]}... (score: {score:.2f})"
                 )
 
-        # Return video with highest score
+        # Return video with highest score if it meets the minimum threshold
         if scored_videos:
             best = max(scored_videos, key=lambda v: v.get("_score", 0))
+            best_score = best.get("_score", 0)
+
+            # Check if best video meets minimum score threshold
+            if best_score < self.min_score:
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] ✗ Best video score ({best_score:.2f}) is below minimum threshold ({self.min_score})"
+                    )
+                    logger.info(f"[VERBOSE] ✗ Rejected: {best.get('title')}")
+                logger.warning(
+                    f"No video found with acceptable score (best: {best_score:.2f}, minimum: {self.min_score})"
+                )
+                return None
+
+            if self.verbose:
+                logger.info(
+                    f"[VERBOSE] ✓ Selected video: {best.get('title')} (score: {best_score:.2f})"
+                )
+                logger.info(f"[VERBOSE] ✓ Video ID: {best.get('id')}")
             return best
 
         return None
@@ -787,7 +913,7 @@ class Downloader:
         output_directory: Path,
         youtube_url: str,
         dry_run: bool = False,
-    ) -> Tuple[bool, str | None, str | None]:
+    ) -> Tuple[bool, str | None, str | None, dict | None]:
         """
         Create a STRM file pointing to direct video stream URL and download subtitles
 
@@ -799,7 +925,7 @@ class Downloader:
             dry_run: If True, simulate without creating files
 
         Returns:
-            Tuple (success, file_path, error_message)
+            Tuple (success, file_path, error_message, video_info)
         """
         try:
             base_filename = self.build_jellyfin_filename(series, episode)
@@ -823,11 +949,11 @@ class Downloader:
                     # Get the best format URL
                     stream_url = info["formats"][-1]["url"]
                 else:
-                    return False, None, "Could not extract stream URL"
+                    return False, None, "Could not extract stream URL", None
 
             if dry_run:
                 logger.info(f"DRY RUN: Would create STRM file: {strm_file}")
-                return True, str(strm_file), None
+                return True, str(strm_file), None, info
 
             # Write direct stream URL to STRM file
             with open(strm_file, "w", encoding="utf-8") as f:
@@ -838,12 +964,12 @@ class Downloader:
             # Download subtitles separately (they will be placed next to the STRM file)
             self._download_subtitles_only(youtube_url, output_directory, base_filename)
 
-            return True, str(strm_file), None
+            return True, str(strm_file), None, info
 
         except Exception as e:
             error_msg = f"Error creating STRM file: {str(e)}"
             logger.error(error_msg)
-            return False, None, error_msg
+            return False, None, error_msg, None
 
     def _download_subtitles_only(
         self, youtube_url: str, output_directory: Path, base_filename: str
@@ -898,7 +1024,7 @@ class Downloader:
         force: bool = False,
         youtube_url: str | None = None,
         dry_run: bool = False,
-    ) -> Tuple[bool, str | None, str | None]:
+    ) -> Tuple[bool, str | None, str | None, dict | None]:
         """
         Download an episode from YouTube
 
@@ -911,7 +1037,7 @@ class Downloader:
             dry_run: If True, simulate without downloading or deleting files
 
         Returns:
-            Tuple (success, file_path, error_message)
+            Tuple (success, file_path, error_message, video_info)
         """
         # Build filename
         base_filename = self.build_jellyfin_filename(series, episode)
@@ -919,20 +1045,15 @@ class Downloader:
         # Check if file already exists
         existing_files = list(output_directory.glob(f"{base_filename}.*"))
 
-        # If dry-run and files exist, report and return early
-        if dry_run and existing_files:
-            if force:
-                logger.info(
-                    f"DRY RUN: Would delete and re-download: {existing_files[0].name}"
-                )
-            else:
-                logger.info(f"DRY RUN: File already exists: {existing_files[0].name}")
-            return True, str(existing_files[0]), None
+        # If dry-run and files exist without force, return early
+        if dry_run and existing_files and not force:
+            logger.info(f"DRY RUN: File already exists: {existing_files[0].name}")
+            return True, str(existing_files[0]), None, None
 
         # If not force mode and files exist, just return (file already present)
-        if existing_files and not force:
+        if existing_files and not force and not dry_run:
             logger.info(f"File already exists: {existing_files[0].name}")
-            return True, str(existing_files[0]), None
+            return True, str(existing_files[0]), None, None
 
         # Force mode: delete existing files to allow switching between modes
         if existing_files and force:
@@ -961,13 +1082,26 @@ class Downloader:
             if not youtube_url:
                 error_msg = "No video found on YouTube"
                 logger.warning(error_msg)
-                return False, None, error_msg
+                return False, None, error_msg, None
 
-        # If dry-run mode, return success without downloading
+        # If dry-run mode, extract video info but don't download
         if dry_run:
             logger.info(f"DRY RUN: Would download from {youtube_url}")
-            output_template = f"{base_filename}.mp4"
-            return True, str(output_directory / output_template), None
+            try:
+                # Extract video info for NFO file creation
+                ydl_opts_info = {
+                    "quiet": True,
+                    "no_warnings": True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
+                    video_info = ydl.extract_info(youtube_url, download=False)
+
+                output_template = f"{base_filename}.mp4"
+                return True, str(output_directory / output_template), None, video_info
+            except Exception as e:
+                logger.warning(f"Could not extract video info: {e}")
+                output_template = f"{base_filename}.mp4"
+                return True, str(output_directory / output_template), None, None
 
         # If STRM mode is enabled, create STRM file instead of downloading
         if self.use_strm_files:
@@ -1006,42 +1140,83 @@ class Downloader:
             ],
         }
 
-        try:
-            if self.verbose:
-                logger.info(f"[VERBOSE] Starting download from: {youtube_url}")
-                logger.info(f"[VERBOSE] Output template: {output_template}")
-                logger.info(f"[VERBOSE] Format: {self.format_string}")
-                logger.info(
-                    f"[VERBOSE] Subtitle languages: {', '.join(self.subtitle_languages)}"
-                )
-            else:
-                logger.info(f"Downloading from: {youtube_url}")
+        if self.verbose:
+            logger.info(f"[VERBOSE] Starting download from: {youtube_url}")
+            logger.info(f"[VERBOSE] Output template: {output_template}")
+            logger.info(f"[VERBOSE] Format: {self.format_string}")
+            logger.info(
+                f"[VERBOSE] Subtitle languages: {', '.join(self.subtitle_languages)}"
+            )
+        else:
+            logger.info(f"Downloading from: {youtube_url}")
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(youtube_url, download=True)
+            # Retry logic with exponential backoff for rate limiting errors
+            max_retries = 5
+            base_delay = 2  # Base delay in seconds
+            last_error = None
 
-                # Find downloaded file
-                ext = info.get("ext", "mp4")
-                final_file = output_directory / f"{base_filename}.{ext}"
+            for attempt in range(max_retries):
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(youtube_url, download=True)
 
-                if final_file.exists():
-                    if self.verbose:
-                        logger.info(f"[VERBOSE] Download successful: {final_file}")
-                        logger.info(
-                            f"[VERBOSE] File size: {final_file.stat().st_size / (1024 * 1024):.2f} MB"
-                        )
+                        # Find downloaded file
+                        ext = info.get("ext", "mp4")
+                        final_file = output_directory / f"{base_filename}.{ext}"
+
+                        if final_file.exists():
+                            if self.verbose:
+                                logger.info(
+                                    f"[VERBOSE] Download successful: {final_file}"
+                                )
+                                logger.info(
+                                    f"[VERBOSE] File size: {final_file.stat().st_size / (1024 * 1024):.2f} MB"
+                                )
+                            else:
+                                logger.info(f"Download successful: {final_file}")
+                            return True, str(final_file), None, info
+                        else:
+                            error_msg = "Downloaded file not found"
+                            logger.error(error_msg)
+                            return False, None, error_msg, None
+
+                except Exception as e:
+                    last_error = e
+                    error_str = str(e).lower()
+
+                    # Check if it's a rate limit error (403/429)
+                    if (
+                        "403" in error_str
+                        or "forbidden" in error_str
+                        or "429" in error_str
+                        or "too many" in error_str
+                    ):
+                        if attempt < max_retries - 1:  # Not the last attempt
+                            # Exponential backoff: 2s, 4s, 8s, 16s, 32s
+                            import time
+
+                            delay = base_delay * (2**attempt)
+                            logger.warning(
+                                f"Rate limit error, retrying in {delay}s... (attempt {attempt + 1}/{max_retries})"
+                            )
+                            time.sleep(delay)
+                            continue
+                        else:
+                            error_msg = (
+                                f"Download failed after {max_retries} attempts: {e}"
+                            )
+                            logger.error(error_msg)
+                            return False, None, error_msg, None
                     else:
-                        logger.info(f"Download successful: {final_file}")
-                    return True, str(final_file), None
-                else:
-                    error_msg = "Downloaded file not found"
-                    logger.error(error_msg)
-                    return False, None, error_msg
+                        # Not a rate limit error, don't retry
+                        error_msg = f"Download error: {str(e)}"
+                        logger.error(error_msg)
+                        return False, None, error_msg, None
 
-        except Exception as e:
-            error_msg = f"Download error: {str(e)}"
+            # Should not reach here, but just in case
+            error_msg = f"Download error: {last_error}"
             logger.error(error_msg)
-            return False, None, error_msg
+            return False, None, error_msg, None
 
     def file_exists(
         self, series: Series, episode: Episode, output_directory: Path
@@ -1050,6 +1225,56 @@ class Downloader:
         base_filename = self.build_jellyfin_filename(series, episode)
         existing_files = list(output_directory.glob(f"{base_filename}.*"))
         return len(existing_files) > 0
+
+    def create_nfo_file(
+        self,
+        base_filename: str,
+        output_directory: Path,
+        video_info: dict,
+        nfo_type: str = "episode",
+    ) -> None:
+        """
+        Create a .nfo file with video metadata for Jellyfin/Kodi compatibility
+
+        Args:
+            base_filename: Base filename (without extension)
+            output_directory: Directory where the NFO file should be saved
+            video_info: Dictionary containing video metadata from yt-dlp
+            nfo_type: Type of NFO file - "episode" for episodedetails, "movie" for movie format
+        """
+        nfo_path = output_directory / f"{base_filename}.nfo"
+
+        # Determine root element based on type
+        root_element = "episodedetails" if nfo_type == "episode" else "movie"
+
+        # Escape all text content for XML safety
+        title = self._escape_xml(video_info.get("title", "Unknown"))
+        description = self._escape_xml(video_info.get("description", ""))
+        channel = self._escape_xml(video_info.get("channel", ""))
+        uploader = self._escape_xml(video_info.get("uploader", ""))
+        video_id = self._escape_xml(video_info.get("id", ""))
+        video_url = self._escape_xml(
+            video_info.get("webpage_url", video_info.get("url", ""))
+        )
+
+        try:
+            with open(nfo_path, "w", encoding="utf-8") as nfo:
+                nfo.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
+                nfo.write(f"<{root_element}>\n")
+                nfo.write(f"  <title>{title}</title>\n")
+                nfo.write(f"  <originaltitle>{title}</originaltitle>\n")
+                nfo.write(f"  <plot>{description}</plot>\n")
+                nfo.write(f"  <studio>{channel}</studio>\n")
+                nfo.write(f"  <director>{uploader}</director>\n")
+                nfo.write(f"  <source>YouTube</source>\n")
+                nfo.write(f"  <id>{video_id}</id>\n")
+                nfo.write(f"  <youtubeurl>{video_url}</youtubeurl>\n")
+                if video_info.get("duration"):
+                    nfo.write(f"  <runtime>{video_info['duration'] // 60}</runtime>\n")
+                nfo.write(f"</{root_element}>\n")
+            logger.info(f"Created NFO file: {nfo_path}")
+        except Exception as e:
+            logger.warning(f"Failed to create NFO file: {e}")
 
     def get_episode_file_info(
         self, series: Series, episode: Episode, output_directory: Path

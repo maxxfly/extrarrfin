@@ -34,6 +34,9 @@ class Config:
     # Jellyfin integration
     jellyfin_url: str | None = None
     jellyfin_api_key: str | None = None
+    # YouTube search options
+    min_score: float = 50.0  # Minimum score to accept a video match
+    youtube_search_results: int = 10  # Number of YouTube results to fetch (5-20)
 
     @classmethod
     def from_file(cls, config_path: Path) -> "Config":

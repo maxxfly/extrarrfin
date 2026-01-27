@@ -190,9 +190,9 @@ def _download_series_extras(
             ],
         }
 
-        # Retry logic for 403 errors
-        max_retries = 3
-        retry_delay = 3  # seconds
+        # Retry logic for 403 errors with exponential backoff
+        max_retries = 5
+        base_delay = 2  # Base delay in seconds
         download_success = False
         last_error = None
 
@@ -201,30 +201,10 @@ def _download_series_extras(
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.extract_info(video_info["url"], download=True)
 
-                # Create .nfo file with video metadata
-                nfo_path = output_dir / f"{base_filename}.nfo"
-                with open(nfo_path, "w", encoding="utf-8") as nfo:
-                    nfo.write(
-                        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-                    )
-                    nfo.write("<movie>\n")
-                    nfo.write(f"  <title>{video_info['title']}</title>\n")
-                    nfo.write(
-                        f"  <originaltitle>{video_info['title']}</originaltitle>\n"
-                    )
-                    nfo.write(f"  <plot>{video_info.get('description', '')}</plot>\n")
-                    nfo.write(f"  <studio>{video_info.get('channel', '')}</studio>\n")
-                    nfo.write(
-                        f"  <director>{video_info.get('uploader', '')}</director>\n"
-                    )
-                    nfo.write(f"  <source>YouTube</source>\n")
-                    nfo.write(f"  <id>{video_info['id']}</id>\n")
-                    nfo.write(f"  <youtubeurl>{video_info['url']}</youtubeurl>\n")
-                    if video_info.get("duration"):
-                        nfo.write(
-                            f"  <runtime>{video_info['duration'] // 60}</runtime>\n"
-                        )
-                    nfo.write("</movie>\n")
+                # Create .nfo file using centralized function
+                downloader.create_nfo_file(
+                    base_filename, output_dir, video_info, nfo_type="movie"
+                )
 
                 console.print(f"    [green]✓ Downloaded {video_title}[/green]")
                 successful_downloads += 1
@@ -235,20 +215,27 @@ def _download_series_extras(
                 last_error = e
                 error_str = str(e).lower()
 
-                # Check if it's a 403 error
-                if "403" in error_str or "forbidden" in error_str:
+                # Check if it's a 403 or 429 error (quota/rate limiting)
+                if (
+                    "403" in error_str
+                    or "forbidden" in error_str
+                    or "429" in error_str
+                    or "too many" in error_str
+                ):
                     if attempt < max_retries - 1:  # Not the last attempt
+                        # Exponential backoff: 2s, 4s, 8s, 16s...
+                        delay = base_delay * (2**attempt)
                         console.print(
-                            f"    [yellow]⚠ HTTP 403 error, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})[/yellow]"
+                            f"    [yellow]⚠ Rate limit error, retrying in {delay}s... (attempt {attempt + 1}/{max_retries})[/yellow]"
                         )
-                        time.sleep(retry_delay)
+                        time.sleep(delay)
                         continue
                     else:
                         console.print(
                             f"    [red]✗ Failed after {max_retries} attempts:[/red] {e}"
                         )
                 else:
-                    # Not a 403 error, don't retry
+                    # Not a rate limit error, don't retry
                     console.print(f"    [red]✗ Failed:[/red] {e}")
                     break
 

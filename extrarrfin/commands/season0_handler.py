@@ -186,30 +186,15 @@ def _download_series_season0(
 
         if dry_run:
             console.print(f"  [yellow]DRY RUN:[/yellow] {ep_info}")
-            # Check if file exists
-            file_info = downloader.get_episode_file_info(series, ep, output_dir)
-            if file_info["has_video"] or file_info["has_strm"]:
-                console.print(f"    [dim]File already present[/dim]")
-            else:
-                console.print(f"    [dim]Would search and download from YouTube[/dim]")
-
-            # Show what would happen with force mode
-            if force and (file_info["has_video"] or file_info["has_strm"]):
-                console.print(
-                    f"    [dim]Would delete existing file and re-download[/dim]"
-                )
-
-            successful_downloads += 1
-            continue
-
-        console.print(f"  [blue]Downloading:[/blue] {ep_info}")
+        else:
+            console.print(f"  [blue]Downloading:[/blue] {ep_info}")
 
         # Show verbose info if enabled
         if verbose:
             console.print(f"    [dim]Search query: '{series.title} {ep.title}'[/dim]")
 
         # Download episode
-        success, file_path, error = downloader.download_episode(
+        success, file_path, error, video_info = downloader.download_episode(
             series,
             ep,
             output_dir,
@@ -220,6 +205,17 @@ def _download_series_season0(
         if success:
             successful_downloads += 1
             console.print(f"    [green]✓ Downloaded:[/green] {file_path}")
+
+            # Create NFO file with video metadata if we have video info
+            if video_info and file_path:
+                try:
+                    from pathlib import Path
+
+                    file_path_obj = Path(file_path)
+                    base_filename = file_path_obj.stem
+                    downloader.create_nfo_file(base_filename, output_dir, video_info)
+                except Exception as e:
+                    console.print(f"    [yellow]⚠ NFO creation warning:[/yellow] {e}")
         else:
             failed_downloads += 1
             console.print(f"    [red]✗ Failed:[/red] {error}")
