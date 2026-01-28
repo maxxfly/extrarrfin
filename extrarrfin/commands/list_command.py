@@ -1,5 +1,5 @@
 """
-List command - Display series with monitored season 0 or want-extras tag
+List command - Display series with monitored season 0 or want-extras tag, and movies with want-extras tag
 """
 
 import logging
@@ -10,6 +10,7 @@ from rich.table import Table
 
 from extrarrfin.config import Config
 from extrarrfin.downloader import Downloader
+from extrarrfin.radarr import RadarrClient
 from extrarrfin.sonarr import SonarrClient
 
 logger = logging.getLogger(__name__)
@@ -20,10 +21,11 @@ def list_command(
     config: Config,
     sonarr: SonarrClient,
     downloader: Downloader,
+    radarr: RadarrClient | None = None,
     limit: str | None = None,
     mode: tuple | None = None,
 ):
-    """Execute the list command logic"""
+    """Execute the list command logic for series and movies"""
 
     # Use mode from command line or config
     # If multiple modes specified, use them; otherwise use config mode
@@ -36,7 +38,7 @@ def list_command(
     else:
         active_modes = [config.mode]
 
-    # Fetch series
+    # Fetch series and movies
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -44,10 +46,22 @@ def list_command(
     ) as progress:
         task = progress.add_task("Fetching series...", total=None)
         series_list = sonarr.get_monitored_series()
+        progress.update(task, description="Fetching movies...")
+
+        # Fetch movies if Radarr configured and tag mode active
+        movies_list = []
+        if radarr and "tag" in active_modes:
+            try:
+                movies_list = radarr.get_monitored_movies()
+            except Exception as e:
+                logger.warning(f"Error fetching movies from Radarr: {e}")
+
         progress.update(task, completed=True)
 
-    # Filter based on mode(s)
-    filtered_series = []
+    # Filter based on mode(s) - combine series and movies into a single list with type indicator
+    filtered_items = []
+
+    # Process series
     for series in series_list:
         include = False
         if "tag" in active_modes and sonarr.has_want_extras_tag(series):
@@ -57,37 +71,53 @@ def list_command(
         ):
             include = True
         if include:
-            filtered_series.append(series)
+            filtered_items.append({"type": "series", "data": series})
+
+    # Process movies (only for tag mode)
+    if "tag" in active_modes:
+        for movie in movies_list:
+            if radarr and radarr.has_want_extras_tag(movie):
+                filtered_items.append({"type": "movie", "data": movie})
 
     # Filter by name/ID if specified
     if limit:
         if limit.isdigit():
-            filtered_series = [s for s in filtered_series if s.id == int(limit)]
+            filtered_items = [
+                item for item in filtered_items if item["data"].id == int(limit)
+            ]
         else:
-            filtered_series = [
-                s for s in filtered_series if limit.lower() in s.title.lower()
+            filtered_items = [
+                item
+                for item in filtered_items
+                if limit.lower() in item["data"].title.lower()
             ]
 
-    if not filtered_series:
+    if not filtered_items:
         if len(active_modes) > 1:
             console.print(
-                f"[yellow]No series found for modes: {', '.join(active_modes)}[/yellow]"
+                f"[yellow]No series/movies found for modes: {', '.join(active_modes)}[/yellow]"
             )
         elif "tag" in active_modes:
-            console.print("[yellow]No series found with want-extras tag[/yellow]")
+            console.print(
+                "[yellow]No series/movies found with want-extras tag[/yellow]"
+            )
         else:
             console.print("[yellow]No series found with monitored season 0[/yellow]")
         return
 
     # Display table
+    series_count = sum(1 for item in filtered_items if item["type"] == "series")
+    movies_count = sum(1 for item in filtered_items if item["type"] == "movie")
+
     if len(active_modes) > 1:
-        table_title = f"Series ({', '.join(active_modes)}) - {len(filtered_series)}"
+        table_title = f"Series & Movies ({', '.join(active_modes)}) - {len(filtered_items)} items ({series_count} series, {movies_count} movies)"
     elif "tag" in active_modes:
-        table_title = f"Series with want-extras tag ({len(filtered_series)})"
+        table_title = f"Series & Movies with want-extras tag ({len(filtered_items)} items: {series_count} series, {movies_count} movies)"
     else:
-        table_title = f"Series with Monitored Season 0 ({len(filtered_series)})"
+        table_title = f"Series with Monitored Season 0 ({len(filtered_items)})"
 
     table = Table(title=table_title)
+    table.add_column("Type", style="yellow", width=9)
     table.add_column("ID", style="cyan")
     table.add_column("Title", style="green")
     table.add_column("Path", style="dim")
@@ -98,10 +128,22 @@ def list_command(
 
     total_size = 0
 
-    for series in filtered_series:
-        # Determine which mode(s) apply to this series
-        has_tag = sonarr.has_want_extras_tag(series)
-        has_season0 = sonarr.has_monitored_season_zero_episodes(series)
+    for item in filtered_items:
+        item_type = item["type"]
+        media = item["data"]
+
+        # Type indicator
+        type_emoji = "📺" if item_type == "series" else "🎬"
+        type_text = (
+            f"{type_emoji} TV" if item_type == "series" else f"{type_emoji} Movie"
+        )
+
+        if item_type == "series":
+            # Process series
+            series = media
+            # Determine which mode(s) apply to this series
+            has_tag = sonarr.has_want_extras_tag(series)
+            has_season0 = sonarr.has_monitored_season_zero_episodes(series)
 
         # Initialize counters
         downloaded_count = 0
@@ -228,6 +270,53 @@ def list_command(
             except Exception as e:
                 logger.warning(f"Error processing extras for {series.title}: {e}")
 
+        else:
+            # Process movie
+            movie = media
+            downloaded_count = 0
+            missing_count = 0
+            subtitle_by_lang: dict[str, int] = {}
+            series_size = 0
+            processed_season0 = False
+
+            try:
+                extras_dir = downloader.get_movie_extras_directory(
+                    movie, config.media_directory, config.radarr_directory
+                )
+
+                if extras_dir.exists():
+                    for file in extras_dir.iterdir():
+                        if not file.is_file():
+                            continue
+
+                        file_size = file.stat().st_size
+
+                        if file.suffix.lower() in {
+                            ".mp4",
+                            ".mkv",
+                            ".avi",
+                            ".mov",
+                            ".wmv",
+                            ".webm",
+                        }:
+                            # Video file in extras
+                            downloaded_count += 1
+                            series_size += file_size
+
+                        elif file.suffix.lower() == ".srt":
+                            # Subtitle in extras
+                            series_size += file_size
+                            parts = file.stem.split(".")
+                            if len(parts) >= 2:
+                                lang = parts[-1]
+                                if lang == "forced" and len(parts) >= 3:
+                                    lang = parts[-2]
+                                subtitle_by_lang[lang] = (
+                                    subtitle_by_lang.get(lang, 0) + 1
+                                )
+            except Exception as e:
+                logger.warning(f"Error processing extras for movie {movie.title}: {e}")
+
         total_size += series_size
 
         # Format subtitle info
@@ -260,9 +349,10 @@ def list_command(
             missing_str = "-"
 
         table.add_row(
-            str(series.id),
-            series.title,
-            series.path,
+            type_text,
+            str(media.id),
+            media.title,
+            media.path,
             str(downloaded_count),
             missing_str,
             srt_info,

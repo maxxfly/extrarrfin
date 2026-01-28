@@ -11,7 +11,7 @@ from typing import Tuple
 
 import yt_dlp
 
-from .models import Episode, Series
+from .models import Episode, Movie, Series
 from .scorer import ScoringWeights, VideoScorer
 
 logger = logging.getLogger(__name__)
@@ -359,6 +359,71 @@ class Downloader:
                                     f"Video found: {video.get('title')} - {video_url}"
                                 )
                         return video_list
+        except Exception as e:
+            logger.error(f"Error during YouTube search: {e}")
+
+        return None
+
+    def search_youtube_for_extras(
+        self, query: str, title: str, verbose: bool = False
+    ) -> dict | None:
+        """
+        Generic search for extras content on YouTube (movies or series)
+        Returns the best matching video based on scoring
+
+        Args:
+            query: Search query (e.g., "Movie Title behind the scenes")
+            title: Title to match against (movie or series name)
+            verbose: Enable verbose logging
+
+        Returns:
+            Video info dict or None if no suitable video found
+        """
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": True,
+            "default_search": f"ytsearch{self.youtube_search_results}",
+            "sleep_requests": 1,
+        }
+
+        if verbose:
+            logger.info(f"[VERBOSE] YouTube search query: '{query}'")
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                search_url = f"ytsearch{self.youtube_search_results}:{query}"
+                if verbose:
+                    logger.info(f"[VERBOSE] Full search URL: {search_url}")
+
+                result = ydl.extract_info(search_url, download=False)
+
+                if result and "entries" in result and result["entries"]:
+                    # Get the first result that seems relevant
+                    for video in result["entries"]:
+                        if video and video.get("id"):
+                            video_url = f"https://www.youtube.com/watch?v={video['id']}"
+                            video_info = {
+                                "id": video["id"],
+                                "url": video_url,
+                                "webpage_url": video_url,
+                                "title": video.get("title", "Unknown"),
+                                "channel": video.get("channel", "Unknown"),
+                                "uploader": video.get(
+                                    "uploader", video.get("channel", "Unknown")
+                                ),
+                                "description": video.get("description", ""),
+                                "duration": video.get("duration", 0),
+                                "view_count": video.get("view_count", 0),
+                            }
+
+                            if verbose:
+                                logger.info(
+                                    f"[VERBOSE] Video found: {video.get('title')}"
+                                )
+                                logger.info(f"[VERBOSE] Video URL: {video_url}")
+
+                            return video_info
         except Exception as e:
             logger.error(f"Error during YouTube search: {e}")
 
@@ -1352,6 +1417,161 @@ class Downloader:
         logger.error(error_msg)
         return False, None, error_msg, None
 
+    def download_video_from_url(
+        self,
+        youtube_url: str,
+        base_filename: str,
+        output_directory: Path,
+        force: bool = False,
+        dry_run: bool = False,
+    ) -> Tuple[bool, str | None, str | None, dict | None]:
+        """
+        Download a video from a YouTube URL (generic method for extras, movies, etc.)
+
+        Args:
+            youtube_url: YouTube video URL
+            base_filename: Base filename (without extension)
+            output_directory: Directory to save the file
+            force: If True, re-download even if file exists
+            dry_run: If True, simulate without downloading
+
+        Returns:
+            Tuple (success, file_path, error_message, video_info)
+        """
+        # Check if file already exists
+        existing_files = list(output_directory.glob(f"{base_filename}.*"))
+
+        # If not force mode and files exist, just return
+        if existing_files and not force and not dry_run:
+            logger.info(f"File already exists: {existing_files[0].name}")
+            return True, str(existing_files[0]), None, None
+
+        # Force mode: delete existing files
+        if existing_files and force:
+            for existing_file in existing_files:
+                try:
+                    if existing_file.suffix == ".srt":
+                        continue
+                    if dry_run:
+                        logger.info(
+                            f"DRY RUN: Would delete existing file: {existing_file.name}"
+                        )
+                    else:
+                        logger.info(f"Deleting existing file: {existing_file.name}")
+                        existing_file.unlink()
+                except Exception as e:
+                    logger.warning(f"Could not delete {existing_file.name}: {e}")
+
+        # If dry-run mode, extract video info but don't download
+        if dry_run:
+            logger.info(f"DRY RUN: Would download from {youtube_url}")
+            try:
+                ydl_opts_info = {
+                    "quiet": True,
+                    "no_warnings": True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
+                    video_info = ydl.extract_info(youtube_url, download=False)
+
+                output_template = f"{base_filename}.mp4"
+                return True, str(output_directory / output_template), None, video_info
+            except Exception as e:
+                logger.warning(f"Could not extract video info: {e}")
+                output_template = f"{base_filename}.mp4"
+                return True, str(output_directory / output_template), None, None
+
+        # yt-dlp options
+        output_template = str(output_directory / f"{base_filename}.%(ext)s")
+
+        ydl_opts = {
+            "format": self.format_string,
+            "outtmpl": output_template,
+            "quiet": False,
+            "no_warnings": False,
+            "sleep_interval": 2,
+            "sleep_requests": 1,
+            "sleep_subtitles": 1,
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitleslangs": self.subtitle_languages,
+            "allsubtitles": self.download_all_subtitles,
+            "subtitlesformat": "srt",
+            "ignoreerrors": True,
+            "postprocessors": [
+                {
+                    "key": "FFmpegSubtitlesConvertor",
+                    "format": "srt",
+                },
+                {
+                    "key": "FFmpegEmbedSubtitle",
+                    "already_have_subtitle": False,
+                },
+            ],
+        }
+
+        if self.verbose:
+            logger.info(f"[VERBOSE] Starting download from: {youtube_url}")
+            logger.info(f"[VERBOSE] Output template: {output_template}")
+            logger.info(f"[VERBOSE] Format: {self.format_string}")
+        else:
+            logger.info(f"Downloading from: {youtube_url}")
+
+        # Retry logic with exponential backoff
+        max_retries = 5
+        base_delay = 2
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(youtube_url, download=True)
+
+                    ext = info.get("ext", "mp4")
+                    final_file = output_directory / f"{base_filename}.{ext}"
+
+                    if final_file.exists():
+                        if self.verbose:
+                            logger.info(f"[VERBOSE] Download successful: {final_file}")
+                        else:
+                            logger.info(f"Download successful: {final_file}")
+                        return True, str(final_file), None, info
+                    else:
+                        error_msg = "Downloaded file not found"
+                        logger.error(error_msg)
+                        return False, None, error_msg, None
+
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+
+                if (
+                    "403" in error_str
+                    or "forbidden" in error_str
+                    or "429" in error_str
+                    or "too many" in error_str
+                ):
+                    if attempt < max_retries - 1:
+                        import time
+
+                        delay = base_delay * (2**attempt)
+                        logger.warning(
+                            f"Rate limit error, retrying in {delay}s... (attempt {attempt + 1}/{max_retries})"
+                        )
+                        time.sleep(delay)
+                        continue
+                    else:
+                        error_msg = f"Download failed after {max_retries} attempts: {e}"
+                        logger.error(error_msg)
+                        return False, None, error_msg, None
+                else:
+                    error_msg = f"Download error: {str(e)}"
+                    logger.error(error_msg)
+                    return False, None, error_msg, None
+
+        error_msg = f"Download error: {last_error}"
+        logger.error(error_msg)
+        return False, None, error_msg, None
+
     def file_exists(
         self, series: Series, episode: Episode, output_directory: Path
     ) -> bool:
@@ -1502,3 +1722,57 @@ class Downloader:
                 info["subtitle_count"] = info["subtitle_count"] + 1
 
         return info
+
+    def get_movie_directory(
+        self,
+        movie: Movie,
+        media_directory: str | None = None,
+        radarr_directory: str | None = None,
+    ) -> Path:
+        """
+        Determine the target directory for the movie extras
+
+        If media_directory and radarr_directory are provided, do path mapping
+        Otherwise use Radarr path directly
+        """
+        if media_directory and radarr_directory:
+            # Map between Radarr path and real path
+            radarr_path = Path(movie.path)
+            try:
+                # Replace Radarr root with real root
+                relative_path = radarr_path.relative_to(radarr_directory)
+                real_path = Path(media_directory) / relative_path
+            except ValueError:
+                # If path is not relative to radarr_directory, use as-is
+                logger.warning(f"Cannot map path for {movie.path}")
+                real_path = Path(movie.path)
+        else:
+            real_path = Path(movie.path)
+
+        # Create extras directory if it doesn't exist
+        extras_dir = real_path / "extras"
+        extras_dir.mkdir(parents=True, exist_ok=True)
+
+        return extras_dir
+
+    def get_movie_extras_directory(
+        self,
+        movie: Movie,
+        media_directory: str | None = None,
+        radarr_directory: str | None = None,
+    ) -> Path:
+        """Alias for get_movie_directory for consistency with get_extras_directory"""
+        return self.get_movie_directory(movie, media_directory, radarr_directory)
+
+    def build_movie_extras_filename(self, movie: Movie, video_title: str) -> str:
+        """
+        Build a filename for movie extras
+        Format: MovieName (Year) - ExtraTitle.ext
+        """
+        movie_name = self.sanitize_filename(movie.title)
+        extra_title = self.sanitize_filename(video_title)
+
+        year_str = f" ({movie.year})" if movie.year else ""
+        filename = f"{movie_name}{year_str} - {extra_title}"
+
+        return filename

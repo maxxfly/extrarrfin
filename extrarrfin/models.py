@@ -46,6 +46,21 @@ class Series:
 
 
 @dataclass
+class Movie:
+    """Represents a movie in Radarr"""
+
+    id: int
+    title: str
+    path: str
+    monitored: bool
+    year: int | None = None
+    tmdb_id: int | None = None
+    studio: str | None = None
+    tags: List[int] | None = None  # List of tag IDs from Radarr
+    has_file: bool = False
+
+
+@dataclass
 class DownloadResult:
     """Download result"""
 

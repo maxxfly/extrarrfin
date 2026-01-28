@@ -1,4 +1,4 @@
-"""Test command to verify Sonarr and Jellyfin connections"""
+"""Test command to verify Sonarr, Radarr and Jellyfin connections"""
 
 import sys
 
@@ -6,6 +6,7 @@ from rich.console import Console
 
 from ..config import Config
 from ..jellyfin import JellyfinClient
+from ..radarr import RadarrClient
 from ..sonarr import SonarrClient
 
 console = Console()
@@ -14,14 +15,16 @@ console = Console()
 def test_command(
     config: Config,
     sonarr: SonarrClient,
+    radarr: RadarrClient | None,
     jellyfin_url: str | None,
     jellyfin_api_key: str | None,
 ):
-    """Test connection to Sonarr and Jellyfin
+    """Test connection to Sonarr, Radarr (if configured) and Jellyfin
 
     Args:
         config: Application configuration
         sonarr: Sonarr API client
+        radarr: Radarr API client (optional)
         jellyfin_url: Jellyfin server URL (overrides config)
         jellyfin_api_key: Jellyfin API key (overrides config)
     """
@@ -40,6 +43,31 @@ def test_command(
             s for s in monitored if sonarr.has_monitored_season_zero_episodes(s)
         ]
         console.print(f"With monitored season 0 episodes: {len(with_season0)}")
+
+        with_tag = [s for s in monitored if sonarr.has_want_extras_tag(s)]
+        console.print(f"With want-extras tag: {len(with_tag)}")
+
+        # Test Radarr connection if configured
+        if radarr:
+            console.print("\n[bold]Testing Radarr connection...[/bold]")
+            console.print(f"URL: {config.radarr_url}")
+
+            try:
+                movies = radarr.get_all_movies()
+                console.print("[green]✓ Connection successful![/green]")
+                console.print(f"Number of movies: {len(movies)}")
+
+                monitored_movies = [m for m in movies if m.monitored]
+                console.print(f"Monitored movies: {len(monitored_movies)}")
+
+                with_tag = [
+                    m for m in monitored_movies if radarr.has_want_extras_tag(m)
+                ]
+                console.print(f"With want-extras tag: {len(with_tag)}")
+            except Exception as e:
+                console.print(f"[red]✗ Radarr connection error:[/red] {e}")
+        else:
+            console.print("\n[dim]Radarr not configured (skipping test)[/dim]")
 
         # Test Jellyfin connection if configured
         jf_url = jellyfin_url or config.jellyfin_url

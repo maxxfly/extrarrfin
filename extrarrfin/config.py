@@ -15,8 +15,11 @@ class Config:
 
     sonarr_url: str
     sonarr_api_key: str
+    radarr_url: str | None = None
+    radarr_api_key: str | None = None
     media_directory: str | None = None
     sonarr_directory: str | None = None
+    radarr_directory: str | None = None
     yt_dlp_format: str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
     max_results: int = 1
     log_level: str = "INFO"
@@ -64,10 +67,16 @@ class Config:
             config_data["sonarr_url"] = os.getenv("SONARR_URL")
         if os.getenv("SONARR_API_KEY"):
             config_data["sonarr_api_key"] = os.getenv("SONARR_API_KEY")
+        if os.getenv("RADARR_URL"):
+            config_data["radarr_url"] = os.getenv("RADARR_URL")
+        if os.getenv("RADARR_API_KEY"):
+            config_data["radarr_api_key"] = os.getenv("RADARR_API_KEY")
         if os.getenv("MEDIA_DIRECTORY"):
             config_data["media_directory"] = os.getenv("MEDIA_DIRECTORY")
         if os.getenv("SONARR_DIRECTORY"):
             config_data["sonarr_directory"] = os.getenv("SONARR_DIRECTORY")
+        if os.getenv("RADARR_DIRECTORY"):
+            config_data["radarr_directory"] = os.getenv("RADARR_DIRECTORY")
 
         # Subtitle configuration from environment
         subtitle_langs_env = os.getenv("SUBTITLE_LANGUAGES")

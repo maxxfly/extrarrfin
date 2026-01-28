@@ -26,6 +26,7 @@ from extrarrfin.commands import (
 from extrarrfin.config import Config
 from extrarrfin.downloader import Downloader
 from extrarrfin.jellyfin import JellyfinClient
+from extrarrfin.radarr import RadarrClient
 from extrarrfin.sonarr import SonarrClient
 from extrarrfin.utils import format_episode_info, setup_logging
 
@@ -39,49 +40,88 @@ console = Console()
 )
 @click.option("--sonarr-url", envvar="SONARR_URL", help="Sonarr URL")
 @click.option("--sonarr-api-key", envvar="SONARR_API_KEY", help="Sonarr API key")
+@click.option(
+    "--radarr-url", envvar="RADARR_URL", help="Radarr URL (optional, for movies)"
+)
+@click.option(
+    "--radarr-api-key", envvar="RADARR_API_KEY", help="Radarr API key (optional)"
+)
 @click.option("--media-dir", help="Media directory")
 @click.option("--sonarr-dir", help="Sonarr root directory")
+@click.option("--radarr-dir", help="Radarr root directory")
 @click.option(
     "--log-level",
     default="INFO",
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
 )
 @click.pass_context
-def cli(ctx, config, sonarr_url, sonarr_api_key, media_dir, sonarr_dir, log_level):
-    """ExtrarrFin - Special episodes (Season 0) downloader for Sonarr"""
+def cli(
+    ctx,
+    config,
+    sonarr_url,
+    sonarr_api_key,
+    radarr_url,
+    radarr_api_key,
+    media_dir,
+    sonarr_dir,
+    radarr_dir,
+    log_level,
+):
+    """ExtrarrFin - Extras downloader for Sonarr (Series) and Radarr (Movies)"""
 
     # Setup logging
     setup_logging(log_level)
 
     # Load and validate configuration
     cfg = load_config_from_args(
-        config, sonarr_url, sonarr_api_key, media_dir, sonarr_dir, log_level
+        config,
+        sonarr_url,
+        sonarr_api_key,
+        radarr_url,
+        radarr_api_key,
+        media_dir,
+        sonarr_dir,
+        radarr_dir,
+        log_level,
     )
 
     # Validate Sonarr connection
     sonarr_client = validate_sonarr_connection(cfg)
 
+    # Optionally validate Radarr connection
+    radarr_client = None
+    if cfg.radarr_url and cfg.radarr_api_key:
+        try:
+            radarr_client = RadarrClient(cfg.radarr_url, cfg.radarr_api_key)
+            radarr_client.get_all_movies()  # Test connection
+        except Exception as e:
+            console.print(f"[yellow]Warning:[/yellow] Radarr connection failed: {e}")
+            console.print("[dim]Continuing without Radarr support[/dim]")
+
     # Setup context
     ctx.ensure_object(dict)
-    ctx.obj.update(setup_context(cfg, sonarr_client))
+    ctx_data = setup_context(cfg, sonarr_client)
+    ctx_data["radarr"] = radarr_client
+    ctx.obj.update(ctx_data)
 
 
 @cli.command()
-@click.option("--limit", "-l", help="Limit to specific series (name or ID)")
+@click.option("--limit", "-l", help="Limit to specific series/movie (name or ID)")
 @click.option(
     "--mode",
     "-m",
     type=click.Choice(["season0", "tag"]),
     multiple=True,
-    help="List mode: season0 (monitored Season 0 episodes) or tag (series with want-extras tag). Can be specified multiple times.",
+    help="List mode: season0 (monitored Season 0 episodes) or tag (series/movies with want-extras tag). Can be specified multiple times.",
 )
 @click.pass_context
 def list(ctx, limit, mode):
-    """List all series with monitored season 0 or tagged series"""
+    """List all series with monitored season 0 or tagged series/movies"""
 
     config: Config = ctx.obj["config"]
     sonarr: SonarrClient = ctx.obj["sonarr"]
     downloader: Downloader = ctx.obj["downloader"]
+    radarr: RadarrClient | None = ctx.obj.get("radarr")
 
     # Determine which modes to run
     modes = (
@@ -96,7 +136,7 @@ def list(ctx, limit, mode):
         )
     )
 
-    list_command(config, sonarr, downloader, limit, modes)
+    list_command(config, sonarr, downloader, radarr, limit, modes)
 
 
 @cli.command()
@@ -203,15 +243,17 @@ def download(
                 console.print(
                     "\n[bold magenta]Mode: Tag (Behind-the-Scenes)[/bold magenta]"
                 )
+                radarr: RadarrClient | None = ctx.obj.get("radarr")
                 total, success, failed = download_tag_mode(
                     config,
                     sonarr,
                     downloader,
-                    limit,
-                    dry_run,
-                    force,
-                    no_scan,
-                    verbose,
+                    radarr=radarr,
+                    limit=limit,
+                    dry_run=dry_run,
+                    force=force,
+                    no_scan=no_scan,
+                    verbose=verbose,
                 )
                 total_downloads += total
                 successful_downloads += success
@@ -291,10 +333,11 @@ def scan(ctx, series_id, dry_run):
 )
 @click.pass_context
 def test(ctx, jellyfin_url, jellyfin_api_key):
-    """Test connection to Sonarr and Jellyfin"""
+    """Test connection to Sonarr, Radarr (if configured) and Jellyfin"""
     config: Config = ctx.obj["config"]
     sonarr: SonarrClient = ctx.obj["sonarr"]
-    test_command(config, sonarr, jellyfin_url, jellyfin_api_key)
+    radarr: RadarrClient | None = ctx.obj.get("radarr")
+    test_command(config, sonarr, radarr, jellyfin_url, jellyfin_api_key)
 
 
 @cli.command()

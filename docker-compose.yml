@@ -11,19 +11,29 @@ services:
       # Mount media directory (adjust path to match your setup)
       - /path/to/your/media:/media
     environment:
-      # Optional: Override config with environment variables
+      # Sonarr configuration (required for series)
       - SONARR_URL=${SONARR_URL:-http://sonarr:8989}
       - SONARR_API_KEY=${SONARR_API_KEY}
-      - MEDIA_DIRECTORY=/media
       - SONARR_DIRECTORY=/media
+      
+      # Radarr configuration (optional, for movies)
+      - RADARR_URL=${RADARR_URL:-http://radarr:7878}
+      - RADARR_API_KEY=${RADARR_API_KEY}
+      - RADARR_DIRECTORY=/media
+      
+      # Media directory
+      - MEDIA_DIRECTORY=/media
+      
       # Jellyfin configuration (optional)
       - JELLYFIN_URL=${JELLYFIN_URL:-http://jellyfin:8096}
       - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
+      
       # Subtitle configuration (optional)
       # Comma-separated list of language codes
       - SUBTITLE_LANGUAGES=${SUBTITLE_LANGUAGES:-fr,en,fr-FR,en-US,en-GB}
       # Set to 'true' to download all available subtitles
       - DOWNLOAD_ALL_SUBTITLES=${DOWNLOAD_ALL_SUBTITLES:-false}
+      
       # STRM file mode: create .strm files instead of downloading videos
       # Set to 'true' to enable streaming mode (saves disk space)
       - USE_STRM_FILES=${USE_STRM_FILES:-false}
@@ -36,6 +46,6 @@ services:
 
 networks:
   media:
-    # If you have an existing network with Sonarr, use:
+    # If you have an existing network with Sonarr/Radarr, use:
     # external: true
     # name: your_existing_network

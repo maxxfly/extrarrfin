@@ -18,8 +18,11 @@ def load_config_from_args(
     config_file: str | None,
     sonarr_url: str | None,
     sonarr_api_key: str | None,
+    radarr_url: str | None,
+    radarr_api_key: str | None,
     media_dir: str | None,
     sonarr_dir: str | None,
+    radarr_dir: str | None,
     log_level: str,
 ) -> Config:
     """
@@ -29,8 +32,11 @@ def load_config_from_args(
         config_file: Path to config file
         sonarr_url: Sonarr URL from CLI
         sonarr_api_key: Sonarr API key from CLI
+        radarr_url: Radarr URL from CLI (optional)
+        radarr_api_key: Radarr API key from CLI (optional)
         media_dir: Media directory from CLI
         sonarr_dir: Sonarr directory from CLI
+        radarr_dir: Radarr directory from CLI
         log_level: Log level
 
     Returns:
@@ -46,8 +52,11 @@ def load_config_from_args(
             cfg = Config(
                 sonarr_url=sonarr_url,
                 sonarr_api_key=sonarr_api_key,
+                radarr_url=radarr_url,
+                radarr_api_key=radarr_api_key,
                 media_directory=media_dir,
                 sonarr_directory=sonarr_dir,
+                radarr_directory=radarr_dir,
                 log_level=log_level,
             )
         else:

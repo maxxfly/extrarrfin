@@ -1,18 +1,30 @@
 # ExtrarrFin Configuration
 
+# === SONARR (TV Series) ===
 # Your Sonarr instance URL (without trailing slash)
 sonarr_url: "http://localhost:8989"
 
 # Sonarr API key (found in Settings > General)
 sonarr_api_key: "your_api_key_here"
 
+# === RADARR (Movies) - Optional ===
+# Only used for tag mode to download movie extras
+# Leave empty to disable Radarr support
+radarr_url: "http://localhost:7878"
+radarr_api_key: "your_radarr_api_key_here"
+
+# === DIRECTORIES ===
 # Directory where your media is located (optional)
-# If you run the script on a different machine than Sonarr
+# If you run the script on a different machine than Sonarr/Radarr
 media_directory: "/path/to/your/media"
 
 # Root directory configured in Sonarr (optional)
 # Used to map between Sonarr path and real path
 sonarr_directory: "/path/to/sonarr/media"
+
+# Root directory configured in Radarr (optional)
+# Used to map between Radarr path and real path  
+radarr_directory: "/path/to/radarr/media"
 
 # yt-dlp download format
 # Default: best quality MP4 available
@@ -36,12 +48,13 @@ log_level: "INFO"
 # Mode de fonctionnement (season0, tag, ou les deux)
 # season0: Télécharge les épisodes spéciaux (Season 0) monitored dans Sonarr
 #          Enregistre dans le dossier "Specials"
-# tag: Télécharge des vidéos "behind the scenes" pour les séries avec le tag "want-extras"
-#      Enregistre dans le dossier "extras" au sein de la série
-#      Cherche sur YouTube: "nom de la série - behind the scenes"
+# tag: Télécharge des vidéos "behind the scenes" pour les séries/films avec le tag "want-extras"
+#      Séries: Enregistre dans le dossier "extras" au sein de la série
+#      Films: Enregistre dans le dossier "extras" au sein du film
+#      Cherche sur YouTube: "nom de la série/film - behind the scenes", "making of", etc.
 # Exemples:
-#   mode: "season0"           # Mode season0 uniquement
-#   mode: "tag"               # Mode tag uniquement
+#   mode: "season0"           # Mode season0 uniquement (séries seulement)
+#   mode: "tag"               # Mode tag uniquement (séries + films si Radarr configuré)
 #   mode: ["season0", "tag"]  # Les deux modes (exécute season0 ET tag)
 mode: "season0"
 

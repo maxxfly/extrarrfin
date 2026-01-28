@@ -1,6 +1,6 @@
 # ExtrarrFin 🎬
 
-**ExtrarrFin** is a Python tool that automates the download of special episodes (Season 0) for your monitored series in Sonarr, using yt-dlp to search and download content from YouTube.
+**ExtrarrFin** is a Python tool that automates the download of special episodes (Season 0) for your monitored series in Sonarr, and extras content for movies in Radarr, using yt-dlp to search and download content from YouTube.
 
 ## ✨ Features
 
@@ -11,6 +11,7 @@
 - 🏃 **Dry-run mode**: Lists episodes without downloading them
 - ♻️ **Duplicate detection**: Avoids re-downloading existing files (`--force` option to override)
 - 🔄 **Sonarr integration**: Automatically triggers a scan after download
+- 🎬 **Radarr support**: Download extras content for movies (tag mode only)
 - 🎚️ **Filtering**: Ability to limit to a specific series with `--limit`
 - ⚙️ **Flexible configuration**: YAML file, environment variables or CLI arguments
 - 📂 **Directory mapping**: Support for remote execution with path mapping
@@ -18,7 +19,7 @@
 - 🐳 **Docker support**: Run in a container with Alpine-based image
 - 📝 **Subtitle management**: Automatic download and conversion to SRT format
 - 📺 **STRM mode**: Create streaming files instead of downloading (saves disk space)
-- 🏷️ **Tag mode**: Download behind-the-scenes videos based on Sonarr tags ([see documentation](TAG_MODE.md))
+- 🏷️ **Tag mode**: Download behind-the-scenes videos based on Sonarr/Radarr tags ([see documentation](TAG_MODE.md))
 
 ## � What Gets Downloaded?
 
@@ -90,6 +91,57 @@ Monitored series in Sonarr: "Breaking Bad"
 
 **Result**: Only episodes S00E01 and S00E02 will be downloaded.
 
+## 🎬 Movie Extras (Radarr Support)
+
+ExtrarrFin can also download extras content for movies using **tag mode** with Radarr (optional).
+
+### How it works
+
+1. **Tag your movies** in Radarr with the tag `want-extras` or `want_extras`
+2. **Configure Radarr** in your config.yaml (URL and API key)
+3. **Run in tag mode**: `python extrarrfin.py download -m tag`
+
+### What gets downloaded
+
+For each tagged movie, ExtrarrFin searches YouTube for:
+- 🎬 **Behind the scenes** footage
+- 🎥 **Making of** documentaries
+- 🎤 **Interviews** and featurettes
+- 🎭 **Deleted scenes**
+- 😂 **Bloopers** and gag reels
+
+### Storage location
+
+Movie extras are saved in an `extras/` folder within the movie directory:
+
+```
+/path/to/movies/
+└── Movie Name (2023)/
+    ├── Movie Name (2023).mp4          # Main movie file
+    └── extras/
+        ├── Movie Name (2023) - Behind the Scenes.mp4
+        ├── Movie Name (2023) - Making Of.mp4
+        └── Movie Name (2023) - Interviews.mp4
+```
+
+### Example
+
+```
+Tagged movie in Radarr: "Inception (2010)" with tag "want-extras"
+
+ExtrarrFin will search YouTube for:
+  ✅ "Inception behind the scenes"
+  ✅ "Inception making of"
+  ✅ "Inception featurette"
+  ✅ "Inception interviews"
+  ✅ "Inception deleted scenes"
+  ✅ "Inception bloopers"
+
+Results are saved to: /movies/Inception (2010)/extras/
+```
+
+**Note**: Radarr is entirely optional. If not configured, ExtrarrFin works normally with Sonarr only.
+
 ## 📚 Documentation
 
 - **[README.md](README.md)** (this file) - General documentation and usage guide
@@ -99,8 +151,10 @@ Monitored series in Sonarr: "Breaking Bad"
 ## 📋 Prerequisites
 
 - Python 3.8+
-- An operational Sonarr instance
+- An operational Sonarr instance (required)
 - Sonarr API access (API key)
+- An operational Radarr instance (optional, for movies)
+- Radarr API access (optional, API key)
 - FFmpeg (for yt-dlp)
 
 ## 🚀 Installation
@@ -155,11 +209,18 @@ nano config.yaml
 Example `config.yaml`:
 
 ```yaml
+# === SONARR (TV Series) - Required ===
 # Your Sonarr instance URL
 sonarr_url: "http://localhost:8989"
 
 # Sonarr API key
 sonarr_api_key: "your_api_key_here"
+
+# === RADARR (Movies) - Optional ===
+# Only used for tag mode to download movie extras
+# Leave empty to disable Radarr support
+radarr_url: "http://localhost:7878"
+radarr_api_key: "your_radarr_api_key_here"
 
 # Jellyfin configuration (optional)
 jellyfin_url: "http://localhost:8096"
@@ -171,6 +232,9 @@ media_directory: "/mnt/media/TV Shows"
 # Root directory in Sonarr (optional)
 sonarr_directory: "/tv"
 
+# Root directory in Radarr (optional)
+radarr_directory: "/movies"
+
 # yt-dlp download format
 yt_dlp_format: "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
 
@@ -180,6 +244,11 @@ min_score: 50.0             # Minimum score to accept a video match (40-80)
 
 # Log level
 log_level: "INFO"
+
+# Mode: season0 (series only), tag (series + movies), or both
+# season0: Downloads monitored Season 0 episodes from Sonarr
+# tag: Downloads behind-the-scenes for series/movies with "want-extras" tag
+mode: "season0"
 
 # Schedule mode (optional)
 schedule_enabled: false
@@ -214,10 +283,13 @@ Or export variables directly:
 ```bash
 export SONARR_URL="http://localhost:8989"
 export SONARR_API_KEY="your_api_key_here"
+export RADARR_URL="http://localhost:7878"
+export RADARR_API_KEY="your_radarr_api_key_here"
 export JELLYFIN_URL="http://localhost:8096"
 export JELLYFIN_API_KEY="your_jellyfin_api_key_here"
 export MEDIA_DIRECTORY="/mnt/media/TV Shows"
 export SONARR_DIRECTORY="/tv"
+export RADARR_DIRECTORY="/movies"
 export SUBTITLE_LANGUAGES="fr,en,es"
 export DOWNLOAD_ALL_SUBTITLES="false"
 export USE_STRM_FILES="false"
@@ -227,6 +299,10 @@ export USE_STRM_FILES="false"
 
 ```bash
 python extrarrfin.py --sonarr-url http://localhost:8989 --sonarr-api-key YOUR_KEY list
+
+# With Radarr for movies support
+python extrarrfin.py --sonarr-url http://localhost:8989 --sonarr-api-key YOUR_SONARR_KEY \
+  --radarr-url http://localhost:7878 --radarr-api-key YOUR_RADARR_KEY list
 ```
 
 ## 📖 Usage
@@ -252,6 +328,14 @@ URL: http://localhost:8989
 Number of series: 42
 Monitored series: 35
 With monitored season 0 episodes: 12
+With want-extras tag: 8
+
+Testing Radarr connection...
+URL: http://localhost:7878
+✓ Connection successful!
+Number of movies: 156
+Monitored movies: 145
+With want-extras tag: 8
 
 Testing Jellyfin connection...
 URL: http://localhost:8096
@@ -260,10 +344,11 @@ Server: My Jellyfin Server
 Version: 10.8.13
 ```
 
-#### `list` - List series and episodes
+#### `list` - List series and movies
 
-Displays detailed information about your Season 0 episodes including:
-- 📊 Number of downloaded episodes
+Displays detailed information about your Season 0 episodes and tagged extras including:
+- 📺 Media type (Series or Movie)
+- 📊 Number of downloaded episodes/extras
 - 📊 Number of missing episodes  
 - 📝 Subtitle count and languages (fr, en, etc.)
 - 🎬 File type indicators (Video/STRM)
@@ -272,24 +357,47 @@ Displays detailed information about your Season 0 episodes including:
 # List all series with monitored Season 0
 python extrarrfin.py list
 
-# Limit to a specific series (by name)
+# List series and movies with want-extras tag
+python extrarrfin.py list --mode tag
+
+# List both Season 0 and tagged series/movies
+python extrarrfin.py list --mode season0 --mode tag
+
+# Limit to a specific series or movie (by name)
 python extrarrfin.py list --limit "Breaking Bad"
+python extrarrfin.py list --mode tag --limit "Inception"
 
 # Limit to a specific series (by ID)
 python extrarrfin.py list --limit 42
 ```
 
-**Example output:**
+**Example output (Season 0 mode):**
 ```
 Series with Monitored Season 0 (2)
-┏━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━┓
-┃ ID ┃ Title         ┃ Path                        ┃ Downloaded ┃ Missing ┃ Subtitles  ┃ Size   ┃
-┡━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━┩
-│ 42 │ Breaking Bad  │ /media/TV Shows/Breaking... │ 5          │ 2       │ 5 en, 5 fr │ 2.4 GB │
-│ 43 │ The Office    │ /media/TV Shows/The Offi... │ 3          │ 1       │ 3 en       │ 856 MB │
-└────┴───────────────┴─────────────────────────────┴────────────┴─────────┴────────────┴────────┘
+┏━━━━━━━━┳━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━┓
+┃ Type   ┃ ID ┃ Title         ┃ Path                        ┃ Downloaded ┃ Missing ┃ Subtitles  ┃ Size   ┃
+┡━━━━━━━━╇━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━┩
+│ 📺 TV  │ 42 │ Breaking Bad  │ /media/TV Shows/Breaking... │ 5          │ 2       │ 5 en, 5 fr │ 2.4 GB │
+│ 📺 TV  │ 43 │ The Office    │ /media/TV Shows/The Offi... │ 3          │ 1       │ 3 en       │ 856 MB │
+└────────┴────┴───────────────┴─────────────────────────────┴────────────┴─────────┴────────────┴────────┘
 
 Total size: 3.26 GB
+```
+
+**Example output (Tag mode with series and movies):**
+```
+Series & Movies with want-extras tag (5 items: 3 series, 2 movies)
+┏━━━━━━━━┳━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━┓
+┃ Type   ┃ ID ┃ Title         ┃ Path                        ┃ Downloaded ┃ Missing ┃ Subtitles  ┃ Size   ┃
+┡━━━━━━━━╇━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━┩
+│ 📺 TV  │ 42 │ Breaking Bad  │ /media/TV Shows/Breaking... │ 8          │ -       │ 8 en, 8 fr │ 1.2 GB │
+│ 📺 TV  │ 43 │ The Office    │ /media/TV Shows/The Offi... │ 5          │ -       │ 5 en       │ 756 MB │
+│ 🎬 Movie│ 12 │ Inception     │ /media/Movies/Inception...  │ 6          │ -       │ 6 en       │ 980 MB │
+│ 📺 TV  │ 88 │ Stranger Thi..│ /media/TV Shows/Stranger... │ 10         │ -       │ 10 en      │ 1.8 GB │
+│ 🎬 Movie│ 45 │ The Dark Kni..│ /media/Movies/The Dark K... │ 7          │ -       │ 7 en       │ 1.1 GB │
+└────────┴────┴───────────────┴─────────────────────────────┴────────────┴─────────┴────────────┴────────┘
+
+Total size: 5.83 GB
 ```
 
 #### `download` - Download episodes
@@ -458,13 +566,33 @@ Next run in 6 hours
 # Use a specific configuration file
 python extrarrfin.py --config /path/to/config.yaml list
 
-# Specify URL and API key directly
+# Specify Sonarr URL and API key directly
 python extrarrfin.py --sonarr-url http://localhost:8989 --sonarr-api-key YOUR_KEY list
+
+# Add Radarr for movie support
+python extrarrfin.py --sonarr-url http://localhost:8989 --sonarr-api-key YOUR_SONARR_KEY \
+  --radarr-url http://localhost:7878 --radarr-api-key YOUR_RADARR_KEY \
+  --radarr-dir /movies download --mode tag
 
 # Set log level
 python extrarrfin.py --log-level DEBUG list
 
 # Specify mapping directories
+python extrarrfin.py --media-dir /mnt/media --sonarr-dir /tv download
+```
+
+**Available CLI options:**
+- `--config PATH` - Path to configuration file (default: config.yaml)
+- `--sonarr-url URL` - Sonarr URL
+- `--sonarr-api-key KEY` - Sonarr API key
+- `--radarr-url URL` - Radarr URL (optional, for movie support)
+- `--radarr-api-key KEY` - Radarr API key (optional)
+- `--radarr-dir PATH` - Radarr root directory (optional)
+- `--jellyfin-url URL` - Jellyfin URL (optional)
+- `--jellyfin-api-key KEY` - Jellyfin API key (optional)
+- `--media-dir PATH` - Local media directory path
+- `--sonarr-dir PATH` - Sonarr media directory path
+- `--log-level LEVEL` - Logging level (DEBUG, INFO, WARNING, ERROR)
 python extrarrfin.py --media-dir /mnt/media --sonarr-dir /tv download
 ```
 
@@ -518,6 +646,33 @@ python extrarrfin.py download --limit "Series Name" --force
 python extrarrfin.py download --jellyfin-url http://localhost:8096 --jellyfin-api-key YOUR_KEY
 
 # Or configure in config.yaml and run normally
+python extrarrfin.py download
+```
+
+### Scenario 6: Download movie extras (Radarr)
+
+```bash
+# Tag movies in Radarr with "want-extras" tag
+# Then run in tag mode
+python extrarrfin.py download --mode tag
+
+# Test with a single movie
+python extrarrfin.py list --mode tag --limit "Inception"
+python extrarrfin.py download --mode tag --limit "Inception" --dry-run
+python extrarrfin.py download --mode tag --limit "Inception"
+
+# Download extras for both series AND movies
+python extrarrfin.py download --mode tag
+```
+
+### Scenario 7: Mixed workflow (Season 0 + Extras)
+
+```bash
+# Download Season 0 for series + extras for tagged series/movies
+python extrarrfin.py download --mode season0 --mode tag
+
+# Or configure in config.yaml
+# mode: ["season0", "tag"]
 python extrarrfin.py download
 ```
 
@@ -1020,15 +1175,27 @@ services:
       - ./config:/config
       - /path/to/your/media:/media
     environment:
+      # Sonarr (required for series)
       - SONARR_URL=http://sonarr:8989
       - SONARR_API_KEY=your_api_key_here
+      - SONARR_DIRECTORY=/media
+      
+      # Radarr (optional for movies)
+      - RADARR_URL=http://radarr:7878
+      - RADARR_API_KEY=your_radarr_api_key_here
+      - RADARR_DIRECTORY=/media
+      
+      # Jellyfin (optional)
       - JELLYFIN_URL=http://jellyfin:8096
       - JELLYFIN_API_KEY=your_jellyfin_api_key_here
+      
+      # Media directory
       - MEDIA_DIRECTORY=/media
-      - SONARR_DIRECTORY=/media
+      
       # Subtitle configuration (optional)
       - SUBTITLE_LANGUAGES=fr,en,fr-FR,en-US,en-GB
       - DOWNLOAD_ALL_SUBTITLES=false
+      
       # STRM file mode (optional) - set to true to stream instead of download
       - USE_STRM_FILES=false
     command: ["--config", "/config/config.yaml", "schedule-mode"]
@@ -1061,7 +1228,9 @@ You can override config with environment variables:
 ```bash
 docker run --rm \
   -e SONARR_URL=http://sonarr:8989 \
-  -e SONARR_API_KEY=your_key \
+  -e SONARR_API_KEY=your_sonarr_key \
+  -e RADARR_URL=http://radarr:7878 \
+  -e RADARR_API_KEY=your_radarr_key \
   -e JELLYFIN_URL=http://jellyfin:8096 \
   -e JELLYFIN_API_KEY=your_jellyfin_key \
   -e MEDIA_DIRECTORY=/media \
@@ -1073,19 +1242,22 @@ docker run --rm \
 ```
 
 Available environment variables:
-- `SONARR_URL`: Sonarr instance URL
-- `SONARR_API_KEY`: Sonarr API key
+- `SONARR_URL`: Sonarr instance URL (required)
+- `SONARR_API_KEY`: Sonarr API key (required)
+- `RADARR_URL`: Radarr instance URL (optional, for movies)
+- `RADARR_API_KEY`: Radarr API key (optional)
 - `JELLYFIN_URL`: Jellyfin server URL (optional)
 - `JELLYFIN_API_KEY`: Jellyfin API key (optional)
 - `MEDIA_DIRECTORY`: Path to media directory
 - `SONARR_DIRECTORY`: Sonarr root directory path
+- `RADARR_DIRECTORY`: Radarr root directory path
 - `SUBTITLE_LANGUAGES`: Comma-separated language codes (e.g., `fr,en,de,es`)
 - `DOWNLOAD_ALL_SUBTITLES`: Set to `true` to download all available subtitles
 - `USE_STRM_FILES`: Set to `true` to create STRM files instead of downloading videos
 
-### Docker with existing Sonarr network
+### Docker with existing Sonarr/Radarr network
 
-If Sonarr is already running in Docker:
+If Sonarr/Radarr is already running in Docker:
 
 ```bash
 # Find Sonarr's network
@@ -1095,7 +1267,7 @@ docker network ls
 networks:
   media:
     external: true
-    name: sonarr_network_name
+    name: sonarr_radarr_network_name
 ```
 
 ## 🤝 Contributing
@@ -1117,13 +1289,14 @@ This project is licensed under the MIT License. See the `LICENSE` file for more 
 This tool downloads content from YouTube. Make sure to respect:
 - YouTube's Terms of Service
 - Copyright laws in your country
-- Sonarr's Terms of Service
+- Sonarr/Radarr Terms of Service
 
 Use this tool responsibly and only for content you have the rights to.
 
 ## 🙏 Acknowledgments
 
 - [Sonarr](https://sonarr.tv/) - The TV series manager
+- [Radarr](https://radarr.video/) - The movie manager
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) - The YouTube downloader
 - [Click](https://click.palletsprojects.com/) - The CLI library
 - [Rich](https://github.com/Textualize/rich) - Terminal display
@@ -1134,7 +1307,7 @@ For any questions or issues:
 - 📖 Check the [SCORING.md](SCORING.md) documentation for video matching issues
 - 🏷️ Check the [TAG_MODE.md](TAG_MODE.md) documentation for tag-based downloads
 - 🐛 Open an issue on GitHub
-- 📚 Check Sonarr documentation
+- 📚 Check Sonarr/Radarr documentation
 - 🔍 Check logs with `--log-level DEBUG`
 
 ---
