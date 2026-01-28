@@ -6,6 +6,7 @@
 
 - 🔍 **Automatic detection**: Retrieves all monitored series with monitored Season 0
 - 📺 **YouTube download**: Uses yt-dlp to download special episodes from YouTube
+- 🎯 **Smart video matching**: Intelligent scoring system to find the best video match ([see scoring documentation](SCORING.md))
 - 🎯 **Jellyfin format**: Automatically names files according to Jellyfin-compatible format
 - 🏃 **Dry-run mode**: Lists episodes without downloading them
 - ♻️ **Duplicate detection**: Avoids re-downloading existing files (`--force` option to override)
@@ -50,7 +51,7 @@ Season 0 (also called "Specials") typically includes:
 - 🎥 **Featurettes** and making-of documentaries
 - 📰 **Recap episodes** and previews
 
-### YouTube Search Strategy
+### YouTube Search and Scoring Strategy
 
 For each missing episode, ExtrarrFin searches YouTube using:
 
@@ -60,6 +61,11 @@ For each missing episode, ExtrarrFin searches YouTube using:
 2. **Fallback**: `"Episode Title"` only
    - Used if the first search returns no results
    - Example: "Behind the Scenes"
+
+3. **Smart selection**: Uses an intelligent scoring system to select the best match
+   - Analyzes title match, channel credibility, duration, quality, views, etc.
+   - Only accepts videos above the configured minimum score
+   - **📖 [See detailed scoring documentation](SCORING.md)** for configuration and tuning
 
 ### Download Process
 
@@ -84,7 +90,13 @@ Monitored series in Sonarr: "Breaking Bad"
 
 **Result**: Only episodes S00E01 and S00E02 will be downloaded.
 
-## �📋 Prerequisites
+## 📚 Documentation
+
+- **[README.md](README.md)** (this file) - General documentation and usage guide
+- **[SCORING.md](SCORING.md)** - Detailed scoring system documentation and configuration
+- **[TAG_MODE.md](TAG_MODE.md)** - Tag mode for downloading behind-the-scenes content
+
+## 📋 Prerequisites
 
 - Python 3.8+
 - An operational Sonarr instance
@@ -162,9 +174,9 @@ sonarr_directory: "/tv"
 # yt-dlp download format
 yt_dlp_format: "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
 
-# YouTube search configuration
-youtube_search_results: 10  # Number of results to analyze
-min_score: 50.0             # Minimum score to accept a video match
+# YouTube search and scoring configuration (see SCORING.md for details)
+youtube_search_results: 10  # Number of results to analyze (3-20)
+min_score: 50.0             # Minimum score to accept a video match (40-80)
 
 # Log level
 log_level: "INFO"
@@ -301,12 +313,15 @@ python extrarrfin.py download --limit "Breaking Bad" --episode 5
 
 # Force re-download even if files exist
 # This will delete and replace existing files
-python extrarrfin.py download --force --limit "Series Name"
+python extrarrfin.py download --force, scoring, and download info
+# Very useful to understand which videos are selected and why
+python extrarrfin.py download --verbose
 
-# Don't trigger Sonarr scan after download
-python extrarrfin.py download --no-scan
+# Combine options
+python extrarrfin.py download --limit "Series" --episode 3 --force --verbose --dry-run
+```
 
-# Verbose mode - show detailed search and download info
+> **💡 Tip:** Use `--verbose` mode to see detailed scoring information for each video candidate. This helps understand why certain videos are selected or rejected. See [SCORING.md](SCORING.md) for more details.erbose mode - show detailed search and download info
 python extrarrfin.py download --verbose
 
 # Combine options
@@ -333,10 +348,7 @@ Processing: Breaking Bad
 Summary:
   Total: 2
   Success: 2
-  Failed: 0
-```
-
-**Verbose mode output:**
+  Failed: 0 (with scoring details):**
 ```
 Processing: Breaking Bad
 
@@ -346,19 +358,32 @@ Processing: Breaking Bad
     Search query: 'Breaking Bad Pilot'
     [VERBOSE] Series network: AMC
     [VERBOSE] YouTube search query: 'Breaking Bad Pilot'
-    [VERBOSE] Full search URL: ytsearch5:Breaking Bad Pilot
-    [VERBOSE] Candidate: Breaking Bad: Pilot - Full Episode... (score: 125.50)
-    [VERBOSE] Network match bonus: AMC ~ AMC
-    [VERBOSE] Candidate: Breaking Bad Pilot Scene... (score: 75.20)
-    [VERBOSE] Candidate: Pilot Episode Review... (score: 45.10)
-    [VERBOSE] Video found: Breaking Bad: Pilot - Full Episode
+    [VERBOSE] Analyzing 10 candidates...
+    
+    [VERBOSE] Candidate 1: Breaking Bad: Pilot - Full Episode (Official)
+    [VERBOSE]   Title match: +50.0 | Series: +20.0 | Network: +30.0 (AMC)
+    [VERBOSE]   Duration: +20.0 (47 min) | Quality: +15.0 (official, hd)
+    [VERBOSE]   Views: +10.0 (3.5M) | Resolution: +15.0 (1080p)
+    [VERBOSE]   → Score: 160.0 ✓
+    
+    [VERBOSE] Candidate 2: Breaking Bad Pilot Scene Compilation
+    [VERBOSE]   Title match: +50.0 | Series: +20.0 | Duration: +20.0
+    [VERBOSE]   Quality: -10.0 (clip) | Views: +5.0 | Resolution: +10.0
+    [VERBOSE]   → Score: 95.0 ✓
+    
+    [VERBOSE] Candidate 3: Breaking Bad Review and Analysis
+    [VERBOSE]   Title match: +20.0 | Duration: +20.0 | Quality: -10.0 (review)
+    [VERBOSE]   Views: +3.0 | Resolution: +10.0
+    [VERBOSE]   → Score: 43.0 ✗ (below min_score: 50.0)
+    
+    [VERBOSE] Best match: Breaking Bad: Pilot - Full Episode (Official)
     [VERBOSE] Video URL: https://www.youtube.com/watch?v=...
-    [VERBOSE] Match score: 125.50
-    [VERBOSE] Starting download from: https://www.youtube.com/watch?v=...
-    [VERBOSE] Output template: /media/.../Breaking Bad - S00E01 - Pilot.%(ext)s
-    [VERBOSE] Format: bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best
-    [VERBOSE] Subtitle languages: fr, en, fr-FR, en-US, en-GB
-    [VERBOSE] Download successful: /media/.../Breaking Bad - S00E01 - Pilot.mp4
+    [VERBOSE] Match score: 160.0
+    [VERBOSE] Starting download...
+    ✓ Downloaded: /media/TV Shows/Breaking Bad/Specials/Breaking Bad - S00E01 - Pilot.mp4
+```
+
+> **📖 For detailed explanation of the scoring system**, see [SCORING.md](SCORING.md) [VERBOSE] Download successful: /media/.../Breaking Bad - S00E01 - Pilot.mp4
     [VERBOSE] File size: 1024.56 MB
     ✓ Downloaded: /media/TV Shows/Breaking Bad/Specials/Breaking Bad - S00E01 - Pilot.mp4
 ```
@@ -830,14 +855,27 @@ The script will automatically convert paths.
 ## 🐛 Troubleshooting
 
 ### Problem: "Missing configuration"
+and uses intelligent scoring to find matches.
 
-**Solution**: Create a `config.yaml` file or use environment variables:
+If videos are not found, check that:
+- Episode names in Sonarr are accurate
+- The content exists on YouTube
+- Your `min_score` threshold isn't too high (try lowering to 40-45)
+- Your network can access YouTube
 
+**Debugging steps:**
 ```bash
-export SONARR_URL="http://localhost:8989"
-export SONARR_API_KEY="your_key"
+# Use verbose mode to see scoring details
+python extrarrfin.py download --limit "Series Name" --verbose --dry-run
+
+# Try with lower minimum score
+min_score: 40.0
+
+# Increase number of results analyzed
+youtube_search_results: 15
 ```
 
+📖 **See [SCORING.md](SCORING.md)** for detailed troubleshooting and configuration guid
 ### Problem: "No video found on YouTube"
 
 **Solution**: The tool searches YouTube in two steps:
@@ -1093,9 +1131,11 @@ Use this tool responsibly and only for content you have the rights to.
 ## 📞 Support
 
 For any questions or issues:
-- Open an issue on GitHub
-- Check Sonarr documentation
-- Check logs with `--log-level DEBUG`
+- 📖 Check the [SCORING.md](SCORING.md) documentation for video matching issues
+- 🏷️ Check the [TAG_MODE.md](TAG_MODE.md) documentation for tag-based downloads
+- 🐛 Open an issue on GitHub
+- 📚 Check Sonarr documentation
+- 🔍 Check logs with `--log-level DEBUG`
 
 ---
 

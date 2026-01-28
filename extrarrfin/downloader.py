@@ -1397,7 +1397,6 @@ class Downloader:
                 nfo.write(f"<{root_element}>\n")
                 nfo.write(f"  <title>{title}</title>\n")
                 nfo.write(f"  <originaltitle>{title}</originaltitle>\n")
-                nfo.write(f"  <plot>{description}</plot>\n")
                 nfo.write(f"  <studio>{channel}</studio>\n")
                 nfo.write(f"  <director>{uploader}</director>\n")
                 nfo.write("  <source>YouTube</source>\n")
