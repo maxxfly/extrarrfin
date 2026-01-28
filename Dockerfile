@@ -1,7 +1,7 @@
 # Dockerfile for ExtrarrFin
-# Based on Alpine Linux for minimal image size
+# Based on Debian slim for better compatibility with Deno (required by yt-dlp)
 
-FROM python:3.11-alpine
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
@@ -9,19 +9,14 @@ WORKDIR /app
 # Install system dependencies
 # ffmpeg is required for yt-dlp
 # curl and unzip are required for Deno installation
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y \
     ffmpeg \
-    gcc \
-    musl-dev \
-    python3-dev \
-    libffi-dev \
-    openssl-dev \
-    cargo \
     curl \
     unzip \
-    && rm -rf /var/cache/apk/*
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Deno
+# Install Deno (required by yt-dlp for certain extractors)
 RUN curl -fsSL https://deno.land/install.sh | sh \
     && mv /root/.deno/bin/deno /usr/local/bin/deno \
     && deno --version
