@@ -111,6 +111,8 @@ def download_tag_mode(
     for movie in tagged_movies:
         console.print(f"\n[bold cyan]Processing Movie:[/bold cyan] {movie.title}")
 
+        # radarr is guaranteed to be not None if we have tagged_movies
+        assert radarr is not None
         t, s, f = _download_movie_extras(
             movie, config, radarr, downloader, dry_run, force, no_scan, verbose
         )
@@ -161,9 +163,18 @@ def _download_series_extras(
         console.print(f"  [red]Error:[/red] {e}")
         return total_downloads, successful_downloads, failed_downloads
 
-    # Search for behind the scenes videos
+    # Load existing video IDs from NFO files to avoid re-downloading
+    existing_video_ids = downloader.get_existing_video_ids(output_dir)
+    if existing_video_ids and verbose:
+        console.print(
+            f"  [dim]Found {len(existing_video_ids)} existing videos in NFO files[/dim]"
+        )
+
+    # Search for behind the scenes videos, excluding already downloaded ones
     console.print("  [blue]Searching for behind the scenes videos...[/blue]")
-    video_urls = downloader.search_youtube_behind_scenes(series)
+    video_urls = downloader.search_youtube_behind_scenes(
+        series, exclude_ids=existing_video_ids
+    )
 
     if not video_urls:
         console.print("  [yellow]No behind the scenes videos found[/yellow]")
@@ -180,8 +191,12 @@ def _download_series_extras(
         video_title = downloader.sanitize_filename(video_info["title"])
         base_filename = f"{series_name} - {video_title}"
 
-        # Check if file already exists
-        existing_files = [f for f in output_dir.glob(f"{base_filename}.*")]
+        # Check if file already exists (exclude .part files)
+        existing_files = [
+            f
+            for f in output_dir.glob(f"{base_filename}.*")
+            if not f.suffix.endswith(".part") and f.suffix != ".nfo"
+        ]
         if existing_files and not force:
             console.print(f"    [dim]{video_title} already exists, skipping[/dim]")
             successful_downloads += 1
@@ -204,7 +219,7 @@ def _download_series_extras(
             "no_warnings": not verbose,
             "sleep_interval": 2,
             "sleep_requests": 1,
-            "sleep_subtitles": 1,
+            "sleep_subtitles": 3,
             "writesubtitles": True,
             "writeautomaticsub": True,
             "subtitleslangs": downloader.subtitle_languages,
@@ -307,28 +322,61 @@ def _download_movie_extras(
         radarr_directory=config.radarr_directory,
     )
 
+    # Load existing video IDs from NFO files to avoid re-downloading
+    downloaded_video_ids: set[str] = downloader.get_existing_video_ids(output_dir)
+    if downloaded_video_ids and verbose:
+        console.print(
+            f"  [dim]Found {len(downloaded_video_ids)} existing videos in NFO files[/dim]"
+        )
+
     console.print(f"  [dim]Directory:[/dim] {output_dir}")
 
-    # Search terms for behind the scenes content
-    search_terms = [
-        "behind the scenes",
-        "making of",
-        "featurette",
-        "interviews",
-        "deleted scenes",
-        "bloopers",
-    ]
+    # Search terms for behind the scenes and effects content (from config)
+    search_terms = getattr(
+        config,
+        "movie_extras_keywords",
+        [
+            "behind the scenes",
+            "making of",
+            "featurette",
+            "interviews",
+            "deleted scenes",
+            "bloopers",
+            "vfx",
+            "special effect",
+            "special effects",
+            "visual effect",
+            "visual effects",
+            "SFX",
+            "FX",
+        ],
+    )
 
     for search_term in search_terms:
-        query = f"{movie.title} {search_term}"
+        # Include year in query for better results
+        if movie.year:
+            query = f"{movie.title} {movie.year} {search_term}"
+        else:
+            query = f"{movie.title} {search_term}"
         console.print(f"\n  [blue]Searching:[/blue] '{query}'")
 
-        # Search for the video
-        video_info = downloader.search_youtube_for_extras(query, movie.title, verbose)
+        # Search for the video, passing year for filtering and excluding already downloaded videos
+        video_info = downloader.search_youtube_for_extras(
+            query,
+            movie.title,
+            verbose,
+            year=movie.year,
+            exclude_ids=downloaded_video_ids,
+        )
 
         if not video_info:
-            console.print(f"    [yellow]✗ No video found[/yellow]")
+            console.print("    [yellow]✗ No video found[/yellow]")
             continue
+
+        # Track this video ID to avoid downloading it again in subsequent searches
+        video_id = video_info.get("id")
+        if video_id:
+            downloaded_video_ids.add(video_id)
 
         total_downloads += 1
 
@@ -346,25 +394,24 @@ def _download_movie_extras(
             successful_downloads += 1
             continue
 
-        # Check if file already exists
+        # Check if file already exists (exclude .part and .nfo files)
         if not force:
-            existing_files = list(output_dir.glob(f"{base_filename}.*"))
+            existing_files = [
+                f
+                for f in output_dir.glob(f"{base_filename}.*")
+                if not f.suffix.endswith(".part") and f.suffix != ".nfo"
+            ]
             if existing_files:
                 console.print(
                     f"    [yellow]✓ Already exists:[/yellow] {existing_files[0].name}"
                 )
                 continue
 
-        # Retry logic for rate limiting
-        max_retries = 5
-        base_delay = 2
-        download_success = False
-
         # Get YouTube URL from video_info
         youtube_url = video_info.get("webpage_url") or video_info.get("url")
 
         if not youtube_url:
-            console.print(f"    [red]✗ Failed:[/red] No YouTube URL found")
+            console.print("    [red]✗ Failed:[/red] No YouTube URL found")
             failed_downloads += 1
             continue
 
@@ -380,15 +427,22 @@ def _download_movie_extras(
             try:
                 from pathlib import Path
 
-                file_path_obj = Path(file_path)
-                base_fn = file_path_obj.stem
-                downloader.create_nfo_file(
-                    base_fn, output_dir, video_info, nfo_type="movie"
-                )
+                if file_path:
+                    file_path_obj = Path(file_path)
+                    base_fn = file_path_obj.stem
+                    downloader.create_nfo_file(
+                        base_fn, output_dir, video_info, nfo_type="movie"
+                    )
             except Exception as e:
                 console.print(f"    [yellow]⚠ NFO creation warning:[/yellow] {e}")
 
             successful_downloads += 1
+
+            # Add delay to avoid rate limiting
+            if not dry_run:
+                import time
+
+                time.sleep(3)  # Wait 3 seconds between downloads
         else:
             # Check if it's a rate limit error
             error_str = str(error).lower() if error else ""
@@ -399,7 +453,7 @@ def _download_movie_extras(
                 or "429" in error_str
                 or "too many" in error_str
             ):
-                console.print(f"    [yellow]⚠ Rate limit reached[/yellow]")
+                console.print("    [yellow]⚠ Rate limit reached[/yellow]")
             else:
                 console.print(f"    [red]✗ Failed:[/red] {error}")
 

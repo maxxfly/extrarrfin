@@ -1,33 +1,35 @@
 # Dockerfile for ExtrarrFin
-# Based on Debian slim for better compatibility with Deno (required by yt-dlp)
+# Multi-stage build for optimized image size and faster builds
 
-FROM python:3.11-slim
+FROM python:3.11-slim as base
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-# ffmpeg is required for yt-dlp
-# curl and unzip are required for Deno installation
-RUN apt-get update && apt-get install -y \
+# Install system dependencies in one layer with cleanup
+# Use --no-install-recommends to minimize package installation
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
     unzip \
     ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Install Deno (required by yt-dlp for certain extractors)
+# Cache this layer separately as it changes rarely
 RUN curl -fsSL https://deno.land/install.sh | sh \
-    && mv /root/.deno/bin/deno /usr/local/bin/deno \
-    && deno --version
+    && mv /root/.deno/bin/deno /usr/local/bin/deno
 
 # Copy requirements first for better layer caching
+# This layer only rebuilds when requirements.txt changes
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install Python dependencies with pip cache
+# Use --no-cache-dir to reduce image size but allow pip to use HTTP cache
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application code (this changes most often, so it's last)
 COPY extrarrfin/ ./extrarrfin/
 COPY extrarrfin.py .
 

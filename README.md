@@ -19,10 +19,12 @@
 - ⚙️ **Flexible configuration**: YAML file, environment variables or CLI arguments
 - 📂 **Directory mapping**: Support for remote execution with path mapping
 - ⏰ **Schedule mode**: Automatic periodic downloads with configurable intervals
-- 🐳 **Docker support**: Run in a container with Alpine-based image
+- 🐳 **Docker support**: Run in a container with Debian-based image
 - 📝 **Subtitle management**: Automatic download and conversion to SRT format
 - 📺 **STRM mode**: Create streaming files instead of downloading (saves disk space)
 - 🏷️ **Tag mode**: Download behind-the-scenes videos based on Sonarr/Radarr tags ([see documentation](TAG_MODE.md))
+- 🧹 **Automatic cleanup**: Removes incomplete `.part` files after failed downloads
+- 🔍 **NFO detection**: Identifies and helps fix missing metadata files
 
 ## � What Gets Downloaded?
 
@@ -98,6 +100,29 @@ Monitored series in Sonarr: "Breaking Bad"
 
 ExtrarrFin can also download extras content for movies using **tag mode** with Radarr (optional).
 
+### Customizing Movie Extras Keywords
+
+You can configure the list of keywords used for YouTube searches in tag mode for movies via the `movie_extras_keywords` section in your `config.yaml`:
+
+```yaml
+movie_extras_keywords:
+  - "behind the scenes"
+  - "making of"
+  - "featurette"
+  - "interviews"
+  - "deleted scenes"
+  - "bloopers"
+  - "vfx"
+  - "special effect"
+  - "special effects"
+  - "visual effect"
+  - "visual effects"
+  - "SFX"
+  - "FX"
+```
+
+If not set, the default list is used (see config.example.yaml).
+
 ### How it works
 
 1. **Tag your movies** in Radarr with the tag `want-extras` or `want_extras`
@@ -106,12 +131,13 @@ ExtrarrFin can also download extras content for movies using **tag mode** with R
 
 ### What gets downloaded
 
-For each tagged movie, ExtrarrFin searches YouTube for:
+For each tagged movie, ExtrarrFin searches YouTube for all keywords in your configuration (see above). By default, this includes:
 - 🎬 **Behind the scenes** footage
 - 🎥 **Making of** documentaries
 - 🎤 **Interviews** and featurettes
 - 🎭 **Deleted scenes**
 - 😂 **Bloopers** and gag reels
+- 🧑‍💻 **VFX, SFX, FX, special/visual effects**
 
 ### Storage location
 
@@ -139,6 +165,13 @@ ExtrarrFin will search YouTube for:
   ✅ "Inception interviews"
   ✅ "Inception deleted scenes"
   ✅ "Inception bloopers"
+  ✅ "Inception vfx"
+  ✅ "Inception special effect"
+  ✅ "Inception special effects"
+  ✅ "Inception visual effect"
+  ✅ "Inception visual effects"
+  ✅ "Inception SFX"
+  ✅ "Inception FX"
 
 Results are saved to: /movies/Inception (2010)/extras/
 ```
@@ -404,6 +437,8 @@ Total size: 5.83 GB
 ```
 
 #### `download` - Download episodes
+
+> **💡 Note:** Incomplete `.part` files are now automatically cleaned up after failed downloads. No manual cleanup needed!
 
 ```bash
 # Dry-run mode (simulation without downloading)

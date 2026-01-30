@@ -3,14 +3,15 @@ Download module via yt-dlp with Jellyfin formatting
 """
 
 import logging
-import math
 import re
-import time
 from pathlib import Path
 from typing import Tuple
 
 import yt_dlp
 
+from .downloader_utils.nfo import NFOWriter
+from .downloader_utils.paths import PathManager
+from .downloader_utils.strm import STRMWriter
 from .models import Episode, Movie, Series
 from .scorer import ScoringWeights, VideoScorer
 
@@ -35,9 +36,6 @@ class Downloader:
         self.subtitle_languages = subtitle_languages or [
             "fr",
             "en",
-            "fr-FR",
-            "en-US",
-            "en-GB",
         ]
         self.download_all_subtitles = download_all_subtitles
         self.use_strm_files = use_strm_files
@@ -53,40 +51,19 @@ class Downloader:
             verbose=verbose,
         )
 
-    @staticmethod
-    def _escape_xml(text: str) -> str:
-        """Escape special XML characters to prevent invalid NFO files"""
-        if not text:
-            return ""
-        return (
-            str(text)
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace('"', "&quot;")
-            .replace("'", "&apos;")
-        )
+        # Initialize helper classes
+        self._path_manager = PathManager()
+        self._nfo_writer = NFOWriter()
+        self._strm_writer = STRMWriter()
 
+    # Delegate to PathManager
     def sanitize_filename(self, filename: str) -> str:
         """Clean a filename to make it compatible"""
-        # Replace invalid characters
-        filename = re.sub(r'[<>:"/\\|?*]', "", filename)
-        # Replace multiple spaces
-        filename = re.sub(r"\s+", " ", filename)
-        return filename.strip()
+        return PathManager.sanitize_filename(filename)
 
     def build_jellyfin_filename(self, series: Series, episode: Episode) -> str:
-        """
-        Build a Jellyfin-compatible filename
-        Format: SeriesName - S00E## - EpisodeTitle.ext
-        """
-        series_name = self.sanitize_filename(series.title)
-        episode_title = self.sanitize_filename(episode.title)
-
-        # Jellyfin format for specials
-        filename = f"{series_name} - S{episode.season_number:02d}E{episode.episode_number:02d} - {episode_title}"
-
-        return filename
+        """Build a Jellyfin-compatible filename"""
+        return PathManager.build_jellyfin_filename(series, episode)
 
     def get_series_directory(
         self,
@@ -94,31 +71,10 @@ class Downloader:
         media_directory: str | None = None,
         sonarr_directory: str | None = None,
     ) -> Path:
-        """
-        Determine the target directory for the series
-
-        If media_directory and sonarr_directory are provided, do path mapping
-        Otherwise use Sonarr path directly
-        """
-        if media_directory and sonarr_directory:
-            # Map between Sonarr path and real path
-            sonarr_path = Path(series.path)
-            try:
-                # Replace Sonarr root with real root
-                relative_path = sonarr_path.relative_to(sonarr_directory)
-                real_path = Path(media_directory) / relative_path
-            except ValueError:
-                # If path is not relative to sonarr_directory, use as-is
-                logger.warning(f"Cannot map path for {series.path}")
-                real_path = Path(series.path)
-        else:
-            real_path = Path(series.path)
-
-        # Create Specials directory if it doesn't exist
-        specials_dir = real_path / "Specials"
-        specials_dir.mkdir(parents=True, exist_ok=True)
-
-        return specials_dir
+        """Determine the target directory for the series (Specials)"""
+        return PathManager.get_series_directory(
+            series, media_directory, sonarr_directory
+        )
 
     def get_extras_directory(
         self,
@@ -126,31 +82,69 @@ class Downloader:
         media_directory: str | None = None,
         sonarr_directory: str | None = None,
     ) -> Path:
-        """
-        Determine the target directory for extras (behind the scenes)
+        """Determine the target directory for extras"""
+        return PathManager.get_extras_directory(
+            series, media_directory, sonarr_directory
+        )
 
-        If media_directory and sonarr_directory are provided, do path mapping
-        Otherwise use Sonarr path directly
-        """
-        if media_directory and sonarr_directory:
-            # Map between Sonarr path and real path
-            sonarr_path = Path(series.path)
-            try:
-                # Replace Sonarr root with real root
-                relative_path = sonarr_path.relative_to(sonarr_directory)
-                real_path = Path(media_directory) / relative_path
-            except ValueError:
-                # If path is not relative to sonarr_directory, use as-is
-                logger.warning(f"Cannot map path for {series.path}")
-                real_path = Path(series.path)
-        else:
-            real_path = Path(series.path)
+    def get_movie_directory(
+        self,
+        movie: Movie,
+        media_directory: str | None = None,
+        radarr_directory: str | None = None,
+    ) -> Path:
+        """Determine the target directory for movie extras"""
+        return PathManager.get_movie_directory(movie, media_directory, radarr_directory)
 
-        # Create extras directory if it doesn't exist
-        extras_dir = real_path / "extras"
-        extras_dir.mkdir(parents=True, exist_ok=True)
+    def get_movie_extras_directory(
+        self,
+        movie: Movie,
+        media_directory: str | None = None,
+        radarr_directory: str | None = None,
+    ) -> Path:
+        """Alias for get_movie_directory"""
+        return PathManager.get_movie_extras_directory(
+            movie, media_directory, radarr_directory
+        )
 
-        return extras_dir
+    def build_movie_extras_filename(self, movie: Movie, video_title: str) -> str:
+        """Build a filename for movie extras"""
+        return PathManager.build_movie_extras_filename(movie, video_title)
+
+    # Delegate to NFOWriter
+    def create_nfo_file(
+        self,
+        base_filename: str,
+        output_directory: Path,
+        video_info: dict,
+        nfo_type: str = "episode",
+    ) -> None:
+        """Create a .nfo file with video metadata"""
+        NFOWriter.create_nfo_file(base_filename, output_directory, video_info, nfo_type)
+
+    def get_existing_video_ids(self, directory: Path) -> set[str]:
+        """Get video IDs from existing NFO files in a directory"""
+        return NFOWriter.extract_video_ids_from_nfo_files(directory)
+
+    # Delegate to STRMWriter
+    def create_strm_file(
+        self,
+        youtube_url: str,
+        base_filename: str,
+        output_directory: Path,
+    ) -> Path:
+        """Create a .strm file containing the YouTube URL"""
+        return STRMWriter.create_strm_file(youtube_url, base_filename, output_directory)
+
+    @staticmethod
+    def _cleanup_part_files(output_directory: Path, base_filename: str) -> None:
+        """Clean up any .part files left behind after a failed download"""
+        try:
+            for part_file in output_directory.glob(f"{base_filename}.*.part"):
+                logger.info(f"Cleaning up incomplete file: {part_file.name}")
+                part_file.unlink()
+        except Exception as e:
+            logger.warning(f"Could not clean up .part files: {e}")
 
     def _clean_episode_title_for_search(self, title: str) -> str:
         """
@@ -292,14 +286,23 @@ class Downloader:
 
         return None
 
-    def search_youtube_behind_scenes(self, series: Series) -> list[dict] | None:
+    def search_youtube_behind_scenes(
+        self, series: Series, exclude_ids: set[str] | None = None
+    ) -> list[dict] | None:
         """
         Search for behind the scenes videos on YouTube
         Returns a list of video dictionaries with metadata (id, title, url, etc.)
 
         Searches for: "series title - behind the scenes"
         Uses the scoring system to find the best matches
+
+        Args:
+            series: Series object to search for
+            exclude_ids: Set of video IDs to exclude (already downloaded)
         """
+        if exclude_ids is None:
+            exclude_ids = set()
+
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
@@ -323,9 +326,24 @@ class Downloader:
                 result = ydl.extract_info(search_url, download=False)
 
                 if result and "entries" in result and result["entries"]:
+                    # Filter out already downloaded videos before scoring
+                    filtered_entries = [
+                        entry
+                        for entry in result["entries"]
+                        if entry
+                        and entry.get("id")
+                        and entry.get("id") not in exclude_ids
+                    ]
+
+                    if self.verbose and len(filtered_entries) < len(result["entries"]):
+                        excluded_count = len(result["entries"]) - len(filtered_entries)
+                        logger.info(
+                            f"[VERBOSE] Excluded {excluded_count} already downloaded videos"
+                        )
+
                     # Score each result to find the best matches
-                    scored_videos = self._score_behind_scenes_videos(
-                        result["entries"], series
+                    scored_videos = self.scorer.score_behind_scenes_videos(
+                        filtered_entries, series
                     )
 
                     if scored_videos:
@@ -365,20 +383,30 @@ class Downloader:
         return None
 
     def search_youtube_for_extras(
-        self, query: str, title: str, verbose: bool = False
+        self,
+        query: str,
+        title: str,
+        verbose: bool = False,
+        year: int | None = None,
+        exclude_ids: set[str] | None = None,
     ) -> dict | None:
         """
         Generic search for extras content on YouTube (movies or series)
-        Returns the best matching video based on scoring
+        Returns the best matching video after validation
 
         Args:
             query: Search query (e.g., "Movie Title behind the scenes")
             title: Title to match against (movie or series name)
             verbose: Enable verbose logging
+            year: Optional year of the movie (for better filtering)
+            exclude_ids: Set of video IDs to exclude (already downloaded)
 
         Returns:
             Video info dict or None if no suitable video found
         """
+        if exclude_ids is None:
+            exclude_ids = set()
+
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
@@ -390,6 +418,8 @@ class Downloader:
         if verbose:
             logger.info(f"[VERBOSE] YouTube search query: '{query}'")
 
+        title_lower = title.lower()
+
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 search_url = f"ytsearch{self.youtube_search_results}:{query}"
@@ -399,717 +429,181 @@ class Downloader:
                 result = ydl.extract_info(search_url, download=False)
 
                 if result and "entries" in result and result["entries"]:
-                    # Get the first result that seems relevant
+                    # Score and filter candidates
+                    candidates = []
                     for video in result["entries"]:
-                        if video and video.get("id"):
-                            video_url = f"https://www.youtube.com/watch?v={video['id']}"
-                            video_info = {
-                                "id": video["id"],
-                                "url": video_url,
-                                "webpage_url": video_url,
-                                "title": video.get("title", "Unknown"),
-                                "channel": video.get("channel", "Unknown"),
-                                "uploader": video.get(
-                                    "uploader", video.get("channel", "Unknown")
-                                ),
-                                "description": video.get("description", ""),
-                                "duration": video.get("duration", 0),
-                                "view_count": video.get("view_count", 0),
-                            }
+                        if not video or not video.get("id"):
+                            continue
 
+                        video_id = video.get("id")
+                        # Skip videos already downloaded in this session
+                        if video_id in exclude_ids:
                             if verbose:
                                 logger.info(
-                                    f"[VERBOSE] Video found: {video.get('title')}"
+                                    f"[VERBOSE] Skipping already downloaded: {video.get('title')}"
                                 )
-                                logger.info(f"[VERBOSE] Video URL: {video_url}")
+                            continue
 
-                            return video_info
+                        video_title = video.get("title", "").lower()
+                        score = 0
+
+                        # Must contain movie/series title
+                        if title_lower in video_title:
+                            score += 50
+                        else:
+                            # Skip videos that don't mention the title at all
+                            continue
+
+                        # Bonus if video mentions the year (for movies)
+                        if year:
+                            if str(year) in video_title:
+                                score += 40
+                            # Also check for adjacent years (sometimes listed differently)
+                            elif (
+                                str(year - 1) in video_title
+                                or str(year + 1) in video_title
+                            ):
+                                score += 20
+
+                        # Penalty if video contains other movie/show names
+                        # (indicates it's for a different production)
+                        other_titles_keywords = [
+                            "rapunzel",
+                            "tangled",
+                            "white collar",
+                            "the wanted",
+                            "most wanted",
+                            "america's most wanted",
+                            "wanted man",
+                        ]
+                        for other_title in other_titles_keywords:
+                            if other_title in video_title:
+                                score -= 100  # Heavy penalty
+
+                        # Bonus for extras-related keywords
+                        extras_keywords = [
+                            "behind the scenes",
+                            "making of",
+                            "featurette",
+                            "interview",
+                            "deleted",
+                            "bloopers",
+                            "bts",
+                            "on set",
+                            "alternate",
+                            "gag reel",
+                            "vfx",
+                            "special effect",
+                            "visual effect",
+                        ]
+                        for keyword in extras_keywords:
+                            if keyword in video_title:
+                                score += 30
+                                break
+
+                        # Penalty for unrelated content
+                        penalty_keywords = [
+                            "gameplay",
+                            "walkthrough",
+                            "reaction",
+                            "review",
+                            "trailer",
+                            "teaser",
+                            "music video",
+                            "official video",
+                            "lyric",
+                            "movie clip",
+                            "scene",
+                            "all action",
+                            "then and now",
+                            "cast then",
+                            "best scenes",
+                            "full movie",
+                            "movie mistakes",
+                            "where to watch",
+                            "how to watch",
+                            "explained",
+                            "breakdown",
+                            "rampage",
+                            "analysis",
+                            "the guns of",
+                            "the art of",
+                            "(action)",
+                            "(horror)",
+                            "(comedy)",
+                            "(drama)",
+                            "full hd",
+                            "1080p",
+                            "4k uhd",
+                        ]
+                        for keyword in penalty_keywords:
+                            if keyword in video_title:
+                                score -= 40
+
+                        if score > 0:
+                            candidates.append((score, video))
+                            if verbose:
+                                logger.info(
+                                    f"[VERBOSE] Candidate: {video.get('title')} (score: {score})"
+                                )
+
+                    # Sort by score (highest first)
+                    candidates.sort(key=lambda x: x[0], reverse=True)
+
+                    # Try each candidate until we find one that's accessible
+                    for score, video in candidates:
+                        video_id = video["id"]
+                        video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+                        # Validate video is accessible
+                        try:
+                            validate_opts = {
+                                "quiet": True,
+                                "no_warnings": True,
+                                "skip_download": True,
+                            }
+                            with yt_dlp.YoutubeDL(validate_opts) as validate_ydl:
+                                video_info = validate_ydl.extract_info(
+                                    video_url, download=False
+                                )
+                                if video_info:
+                                    result_info = {
+                                        "id": video_id,
+                                        "url": video_url,
+                                        "webpage_url": video_url,
+                                        "title": video_info.get("title", "Unknown"),
+                                        "channel": video_info.get("channel", "Unknown"),
+                                        "uploader": video_info.get(
+                                            "uploader",
+                                            video_info.get("channel", "Unknown"),
+                                        ),
+                                        "description": video_info.get(
+                                            "description", ""
+                                        ),
+                                        "duration": video_info.get("duration", 0),
+                                        "view_count": video_info.get("view_count", 0),
+                                    }
+
+                                    if verbose:
+                                        logger.info(
+                                            f"[VERBOSE] Valid video found: {result_info['title']} (score: {score})"
+                                        )
+                                        logger.info(f"[VERBOSE] Video URL: {video_url}")
+
+                                    return result_info
+                        except Exception as e:
+                            if verbose:
+                                logger.info(
+                                    f"[VERBOSE] Video {video_id} not accessible: {e}"
+                                )
+                            continue
+
         except Exception as e:
             logger.error(f"Error during YouTube search: {e}")
 
         return None
 
-    def _score_behind_scenes_videos(
-        self,
-        videos: list,
-        series: Series,
-        min_score: float = 65.0,
-        max_results: int = 20,
-    ) -> list[dict]:
-        """
-        Score behind the scenes video results based on title matching
-
-        Scoring factors:
-        - Contains "behind the scenes" or "bts" or "making of": +50 points
-        - Contains series title: +40 points
-        - Network in title (official content): +50 points
-        - Channel matches network: +50 points
-        - Known BTS content channels: +35 points
-        - Word match ratio: +30 points max
-        - Official/verified channel indicators: +20 points
-        - Shorter title (less extra content): +15 points max
-
-        Penalties:
-        - Other movie/series titles before series name: -80 points
-        - Unrelated channel types: -50 points
-        - Unrelated content indicators: -30 points
-
-        Returns videos with score >= min_score, sorted by score (highest first)
-        """
-        if not videos:
-            return []
-
-        scored_videos = []
-
-        # Known channels that specialize in BTS/behind-the-scenes content
-        known_bts_channels = [
-            "filmisnow",
-            "rotten tomatoes",
-            "ign",
-            "entertainment weekly",
-            "collider",
-            "comicbook.com",
-            "screen rant",
-            "variety",
-            "the hollywood reporter",
-            "deadline",
-            "den of geek",
-            "syfy",
-            "nerdist",
-            "movie trailers source",
-            "joblo",
-        ]
-
-        # Normalize strings for comparison
-        series_lower = series.title.lower()
-        network_lower = series.network.lower() if series.network else None
-
-        if self.verbose and network_lower:
-            logger.info(f"[VERBOSE] Series network: {series.network}")
-
-        for video in videos:
-            if not video:
-                continue
-
-            title = video.get("title", "")
-            title_lower = title.lower()
-            channel = video.get("channel", "")
-            channel_lower = channel.lower()
-            score: float = 0
-
-            # Contains behind the scenes / bts / making of (essential for this mode)
-            if any(
-                phrase in title_lower
-                for phrase in [
-                    "behind the scenes",
-                    "behind the scene",
-                    "bts",
-                    "making of",
-                    "making-of",
-                    "backstage",
-                    "featurette",
-                ]
-            ):
-                score += 50
-
-            # Bonus for VFX/technical breakdown content (interesting BTS content)
-            if any(
-                phrase in title_lower
-                for phrase in ["vfx breakdown", "breakdown", "visual effects"]
-            ):
-                score += 40
-                if self.verbose:
-                    logger.info("[VERBOSE] VFX/Breakdown bonus applied")
-
-            # Contains series title
-            if series_lower in title_lower:
-                score += 40
-
-                # Additional bonus for character/actor focused BTS content
-                # (e.g., "Foundation — Demerzel: Behind the Scenes")
-                if any(
-                    phrase in title_lower
-                    for phrase in [":", "with", "interview", "character"]
-                ) and any(
-                    bts in title_lower
-                    for bts in ["behind the scenes", "behind the scene", "bts"]
-                ):
-                    score += 15
-                    if self.verbose:
-                        logger.info("[VERBOSE] Character/actor BTS bonus applied")
-
-            # Bonus if network name appears in title (indicates official content)
-            if network_lower and network_lower in title_lower:
-                score += 50
-                if self.verbose:
-                    logger.info(
-                        f"[VERBOSE] Network in title bonus: {series.network} found in title"
-                    )
-
-            # Check if channel matches the network (increased bonus)
-            if network_lower and channel:
-                if network_lower in channel_lower or channel_lower in network_lower:
-                    score += 50  # Increased from 40 to favor official channels
-                    if self.verbose:
-                        logger.info(
-                            f"[VERBOSE] Network match bonus: {channel} ~ {series.network}"
-                        )
-                elif len(network_lower) <= 5 and network_lower in channel_lower.split():
-                    score += 50
-                    if self.verbose:
-                        logger.info(
-                            f"[VERBOSE] Network abbreviation match: {channel} ~ {series.network}"
-                        )
-            else:
-                # Check if it's a known BTS content channel (even if not the official network)
-                if any(
-                    known_channel in channel_lower
-                    for known_channel in known_bts_channels
-                ):
-                    score += (
-                        40  # Increased from 35 to better compete with official content
-                    )
-                    if self.verbose:
-                        logger.info(f"[VERBOSE] Known BTS channel bonus: {channel}")
-                # Penalize videos from channels that don't match the network
-                # when we know the network (helps filter out unrelated content)
-                elif network_lower and channel and series_lower in title_lower:
-                    # Only penalize if it's clearly not the right channel
-                    unrelated_keywords = [
-                        "school",
-                        "university",
-                        "college",
-                        "fashion brand",
-                        "prada",
-                        "museum",
-                        "art gallery",
-                        "foundation (charity)",
-                        "sixth form",
-                        "centre",
-                    ]
-                    if any(keyword in channel_lower for keyword in unrelated_keywords):
-                        score -= 50
-                        if self.verbose:
-                            logger.info(
-                                f"[VERBOSE] Penalty: Unrelated channel type: {channel}"
-                            )
-
-            # Check title for educational/unrelated indicators (independent check)
-            if "sixth form" in title_lower or (
-                "durham" in title_lower and "art foundation" in title_lower
-            ):
-                score -= 60
-                if self.verbose:
-                    logger.info(
-                        "[VERBOSE] Penalty: Educational/unrelated content in title"
-                    )
-
-            # Word matching ratio
-            series_words = set(series.title.lower().split())
-            title_words = set(title_lower.split())
-            common_words = series_words & title_words
-            if series_words:
-                word_ratio = len(common_words) / len(series_words)
-                score += word_ratio * 30
-
-            # Check for official/quality indicators
-            title_and_channel = (title + " " + channel).lower()
-            if any(
-                word in title_and_channel for word in ["official", "vevo", "verified"]
-            ):
-                score += 20
-
-            # Prefer shorter titles (less likely to be compilations)
-            title_length = len(title)
-            if title_length < 100:
-                score += 15 * (1 - title_length / 100)
-
-            # PENALTIES: Detect if another title appears BEFORE the series name
-            # This catches cases like "Wrong Turn the Foundation" where "Wrong Turn" is the actual content
-            if series_lower in title_lower:
-                series_position = title_lower.find(series_lower)
-                title_before_series = title_lower[:series_position].strip()
-
-                # Check if there's substantial content before the series name
-                # that looks like another title (multiple capitalized words)
-                if title_before_series:
-                    # Count words that start with capital in original title
-                    original_before = title[:series_position].strip()
-                    capitalized_words = sum(
-                        1
-                        for word in original_before.split()
-                        if word and word[0].isupper()
-                    )
-
-                    # If 2+ capitalized words before series name, likely another title
-                    if capitalized_words >= 2:
-                        score -= 80
-                        if self.verbose:
-                            logger.info(
-                                f"[VERBOSE] Penalty: Possible other title before series name: '{original_before}'"
-                            )
-
-            # Penalize certain patterns that indicate wrong content
-            penalty_patterns = [
-                "compilation",
-                "playlist",
-                "all episodes",
-                "full series",
-                "reaction",
-                "review",
-                "unboxing",
-                "gameplay",
-                "walkthrough",
-                "interview only",
-                "cast interview",
-                "ending explained",
-                "theories",
-            ]
-            if any(word in title_lower for word in penalty_patterns):
-                score -= 30
-
-            # Penalize trailers if they don't explicitly mention BTS content
-            if "trailer" in title_lower:
-                has_bts = any(
-                    phrase in title_lower
-                    for phrase in [
-                        "behind the scenes",
-                        "behind the scene",
-                        "bts",
-                        "making of",
-                        "featurette",
-                    ]
-                )
-                if not has_bts:
-                    score -= 40
-                    if self.verbose:
-                        logger.info("[VERBOSE] Penalty: Trailer without BTS content")
-
-            if self.verbose:
-                logger.info(f"[VERBOSE] Video '{title}' scored {score:.2f} points")
-
-            # Store the score and keep video if it meets minimum
-            if score >= min_score:
-                video["_score"] = score
-                scored_videos.append(video)
-
-        # Sort by score (highest first)
-        scored_videos.sort(key=lambda v: v.get("_score", 0), reverse=True)
-
-        # Remove duplicates based on title similarity and duration
-        scored_videos = self._remove_duplicate_videos(scored_videos)
-
-        # Limit to max_results best videos
-        if len(scored_videos) > max_results:
-            scored_videos = scored_videos[:max_results]
-
-        if self.verbose and scored_videos:
-            logger.info(
-                f"[VERBOSE] Found {len(scored_videos)} videos above minimum score {min_score}"
-            )
-
-        return scored_videos
-
-    def _remove_duplicate_videos(self, videos: list[dict]) -> list[dict]:
-        """
-        Remove duplicate videos based on title similarity and duration proximity
-        Keeps the video with the highest score among duplicates
-
-        Two videos are considered duplicates if:
-        - Title similarity > 80% (based on word overlap)
-        - Duration difference < 10% or < 30 seconds
-        """
-        if not videos:
-            return []
-
-        unique_videos: list = []
-
-        for video in videos:
-            is_duplicate = False
-            video_title = video.get("title", "").lower()
-            video_duration = video.get("duration", 0)
-
-            # Normalize title for comparison (remove common words and punctuation)
-            video_words = set(
-                word.strip(".,!?-—|:;()[]")
-                for word in video_title.split()
-                if len(word) > 2 and word not in ["the", "and", "for", "with", "from"]
-            )
-
-            for existing in unique_videos:
-                existing_title = existing.get("title", "").lower()
-                existing_duration = existing.get("duration", 0)
-
-                existing_words = set(
-                    word.strip(".,!?-—|:;()[]")
-                    for word in existing_title.split()
-                    if len(word) > 2
-                    and word not in ["the", "and", "for", "with", "from"]
-                )
-
-                # Calculate title similarity (Jaccard similarity)
-                if video_words and existing_words:
-                    common_words = video_words & existing_words
-                    all_words = video_words | existing_words
-                    similarity = len(common_words) / len(all_words) if all_words else 0
-                else:
-                    similarity = 0
-
-                # Check duration proximity
-                duration_similar = False
-                if video_duration and existing_duration:
-                    duration_diff = abs(video_duration - existing_duration)
-                    duration_ratio = duration_diff / max(
-                        video_duration, existing_duration
-                    )
-                    duration_similar = duration_diff < 30 or duration_ratio < 0.1
-
-                # Consider it a duplicate if titles are very similar
-                # OR if titles are somewhat similar AND durations are close
-                if similarity > 0.8 or (similarity > 0.6 and duration_similar):
-                    is_duplicate = True
-                    if self.verbose:
-                        logger.info(
-                            f"[VERBOSE] Duplicate detected: '{video.get('title')}' "
-                            f"(similarity: {similarity:.2f}, duration diff: {abs(video_duration - existing_duration)}s) "
-                            f"vs '{existing.get('title')}'"
-                        )
-                    break
-
-            if not is_duplicate:
-                unique_videos.append(video)
-
-        if self.verbose and len(unique_videos) < len(videos):
-            logger.info(
-                f"[VERBOSE] Removed {len(videos) - len(unique_videos)} duplicate(s)"
-            )
-
-        return unique_videos
-
-    def _score_and_select_video(
-        self, videos: list, series: Series, episode_title: str
-    ) -> dict | None:
-        """
-        Score video results based on multiple factors and select the best one
-
-        Scoring factors:
-        - Exact title match: +100 points
-        - Contains episode title: +50 points
-        - Channel matches network: +40 points
-        - Word match ratio: +40 points max
-        - Contains series title: +30 points
-        - Shorter title (less extra content): +20 points max
-        - Official/verified channel indicators: +15 points
-        - View count bonus: +10 points max (logarithmic)
-        - Description contains series/episode: +15 points
-        - Upload date near series year: +20 points max
-
-        Penalties:
-        - Video game content: -150 points
-        - Old year in title: -100 points
-        - Video uploaded before series: -120 points
-        - Content before series name: -80 points
-        - Too short (<1min) or too long (>90min): -50 points
-        - Compilation/playlist: -30 points
-
-        Returns the video with the highest score
-        """
-        if not videos:
-            return None
-
-        scored_videos = []
-
-        # Normalize strings for comparison
-        series_lower = series.title.lower()
-        episode_lower = episode_title.lower()
-        search_words = set((series.title + " " + episode_title).lower().split())
-        network_lower = series.network.lower() if series.network else None
-        series_year = series.year  # Year the series started
-
-        if self.verbose:
-            if network_lower:
-                logger.info(f"[VERBOSE] Series network: {series.network}")
-            if series_year:
-                logger.info(f"[VERBOSE] Series year: {series_year}")
-
-        for video in videos:
-            if not video:
-                continue
-
-            title = video.get("title", "")
-            title_lower = title.lower()
-            channel = video.get("channel", "")
-            channel_lower = channel.lower()
-            description = video.get("description", "") or ""
-            description_lower = description.lower()
-            duration = video.get("duration")  # Duration in seconds
-            view_count = video.get("view_count")
-            upload_date = video.get("upload_date")  # Format: YYYYMMDD
-            score: float = 0
-
-            # ===== POSITIVE SCORING =====
-
-            # Exact match (very rare but best case)
-            if (
-                title_lower == episode_lower
-                or title_lower == f"{series_lower} {episode_lower}"
-            ):
-                score += 100
-
-            # Contains episode title (case insensitive)
-            if episode_lower in title_lower:
-                score += 50
-
-            # Check if channel matches the network (high priority)
-            if network_lower and channel:
-                # Check for exact match or partial match
-                if network_lower in channel_lower or channel_lower in network_lower:
-                    score += 40
-                    if self.verbose:
-                        logger.info(
-                            f"[VERBOSE] Network match bonus: {channel} ~ {series.network}"
-                        )
-                # Check for common abbreviations (e.g., "BBC" in "BBC Studios")
-                elif len(network_lower) <= 5 and network_lower in channel_lower.split():
-                    score += 40
-                    if self.verbose:
-                        logger.info(
-                            f"[VERBOSE] Network abbreviation match: {channel} ~ {series.network}"
-                        )
-
-            # Word matching ratio
-            title_words = set(title_lower.split())
-            common_words = search_words & title_words
-            if search_words:
-                word_ratio = len(common_words) / len(search_words)
-                score += word_ratio * 40
-
-            # Contains series title
-            if series_lower in title_lower:
-                score += 30
-
-            # Prefer shorter titles (less likely to be compilations or unrelated content)
-            title_length = len(title)
-            if title_length < 100:
-                score += 20 * (1 - title_length / 100)
-
-            # [IMPROVEMENT #2] Check for official/verified channel indicators
-            title_and_channel = (title + " " + channel).lower()
-            if any(
-                word in title_and_channel for word in ["official", "vevo", "verified"]
-            ):
-                score += 15
-                if self.verbose:
-                    logger.info("[VERBOSE] Official/verified channel bonus: +15")
-
-            # [IMPROVEMENT #4] View count bonus (logarithmic scale)
-            # Videos with more views are more likely to be legitimate content
-            if view_count and view_count > 0:
-                # log10(1000) = 3, log10(1M) = 6, log10(100M) = 8
-                # Scale: 0-10 points based on views (1K to 100M range)
-                view_score = min(10, max(0, (math.log10(view_count) - 3) * 2))
-                score += view_score
-                if self.verbose and view_score > 2:
-                    logger.info(
-                        f"[VERBOSE] View count bonus: +{view_score:.1f} ({view_count:,} views)"
-                    )
-
-            # [IMPROVEMENT #10] Like ratio bonus
-            # Videos with high like/view ratio are more likely to be quality content
-            like_count = video.get("like_count")
-            if like_count and view_count and view_count > 100:
-                like_ratio = like_count / view_count
-                # Typical good ratio is 2-5%, excellent is 5%+
-                # Scale: 0-8 points based on like ratio
-                if like_ratio >= 0.05:  # 5%+ = excellent engagement
-                    like_bonus = 8
-                elif like_ratio >= 0.03:  # 3-5% = good engagement
-                    like_bonus = 5
-                elif like_ratio >= 0.02:  # 2-3% = decent engagement
-                    like_bonus = 3
-                else:
-                    like_bonus = 0
-                if like_bonus > 0:
-                    score += like_bonus
-                    if self.verbose:
-                        logger.info(
-                            f"[VERBOSE] Like ratio bonus: +{like_bonus} ({like_ratio:.1%} likes)"
-                        )
-
-            # [IMPROVEMENT #5] Description analysis
-            # Check if description contains relevant keywords
-            if description_lower:
-                desc_bonus = 0
-                if series_lower in description_lower:
-                    desc_bonus += 8
-                if episode_lower in description_lower:
-                    desc_bonus += 7
-                # Check for official content indicators in description
-                if any(
-                    word in description_lower
-                    for word in [
-                        "official",
-                        "©",
-                        "all rights reserved",
-                        network_lower or "",
-                    ]
-                    if word
-                ):
-                    desc_bonus += 5
-                if desc_bonus > 0:
-                    score += min(15, desc_bonus)  # Cap at 15 points
-                    if self.verbose:
-                        logger.info(
-                            f"[VERBOSE] Description match bonus: +{min(15, desc_bonus)}"
-                        )
-
-            # [IMPROVEMENT #3] Upload date near series year bonus
-            if upload_date and series_year:
-                try:
-                    upload_year = int(upload_date[:4])
-                    year_diff = abs(upload_year - series_year)
-                    # Bonus for videos uploaded within 5 years of series start
-                    # Full bonus (20) if same year, decreasing to 0 at 5+ years difference
-                    if year_diff <= 5:
-                        year_bonus = 20 * (1 - year_diff / 5)
-                        score += year_bonus
-                        if self.verbose and year_bonus > 5:
-                            logger.info(
-                                f"[VERBOSE] Upload year proximity bonus: +{year_bonus:.1f} (uploaded {upload_year})"
-                            )
-                except (ValueError, TypeError):
-                    pass  # Invalid date format
-
-            # ===== PENALTIES =====
-
-            # Penalize certain patterns that indicate wrong content
-            if any(
-                word in title_lower
-                for word in ["compilation", "playlist", "all episodes", "full series"]
-            ):
-                score -= 30
-
-            # [IMPROVEMENT #1] Duration penalty - too short or too long
-            if duration:
-                if duration < 60:  # Less than 1 minute - probably a trailer/teaser
-                    score -= 50
-                    if self.verbose:
-                        logger.info(
-                            f"[VERBOSE] Duration penalty: -50 (too short: {duration}s)"
-                        )
-                elif duration > 5400:  # More than 90 minutes - probably a compilation
-                    score -= 50
-                    if self.verbose:
-                        logger.info(
-                            f"[VERBOSE] Duration penalty: -50 (too long: {duration // 60}min)"
-                        )
-
-            # STRONG PENALTY: Video game content - not official series content
-            video_game_indicators = [
-                "juno new origins",
-                "juno",
-                "kerbal space program",
-                "ksp",
-                "gameplay",
-                "game play",
-                "let's play",
-                "walkthrough",
-                "gaming",
-                "simulator",
-                "sim",
-                "mod",
-                "modded",
-                "pc game",
-                "video game",
-            ]
-            if any(indicator in title_lower for indicator in video_game_indicators):
-                score -= 150
-                if self.verbose:
-                    logger.info(
-                        "[VERBOSE] Very strong penalty: Video game/gameplay content detected"
-                    )
-
-            # PENALTY: Detect old year in parentheses (e.g., "(1978)") - likely wrong content
-            old_year_match = re.search(r"\(19\d{2}\)", title)
-            if old_year_match:
-                score -= 100
-                if self.verbose:
-                    logger.info(
-                        f"[VERBOSE] Strong penalty: Old year {old_year_match.group()} in title"
-                    )
-
-            # [IMPROVEMENT #9] Video uploaded BEFORE series started - very suspicious
-            if upload_date and series_year:
-                try:
-                    upload_year = int(upload_date[:4])
-                    if upload_year < series_year - 1:
-                        # Video uploaded before series even existed
-                        years_before = series_year - upload_year
-                        penalty = min(120, years_before * 20)
-                        score -= penalty
-                        if self.verbose:
-                            logger.info(
-                                f"[VERBOSE] Strong penalty: Video from {upload_year}, series started {series_year} (-{penalty})"
-                            )
-                except (ValueError, TypeError):
-                    pass
-
-            # PENALTY: Detect if another title appears BEFORE the series name
-            if series_lower in title_lower:
-                series_position = title_lower.find(series_lower)
-                title_before_series = title_lower[:series_position].strip()
-
-                if title_before_series:
-                    words_before = title_before_series.split()
-                    significant_words = [
-                        w
-                        for w in words_before
-                        if w
-                        not in ["-", "|", ":", "the", "a", "an", "for", "and", "of"]
-                    ]
-                    if len(significant_words) >= 2:
-                        score -= 80
-                        if self.verbose:
-                            logger.info(
-                                f"[VERBOSE] Penalty: Content before series name: '{title_before_series}'"
-                            )
-
-            # Store score in video dict
-            video["_score"] = score
-            scored_videos.append(video)
-
-            if self.verbose:
-                logger.info(
-                    f"[VERBOSE] Candidate: {title[:60]}... (score: {score:.2f})"
-                )
-
-        # Return video with highest score if it meets the minimum threshold
-        if scored_videos:
-            best = max(scored_videos, key=lambda v: v.get("_score", 0))
-            best_score = best.get("_score", 0)
-
-            # Check if best video meets minimum score threshold
-            if best_score < self.scorer.min_score:
-                if self.verbose:
-                    logger.info(
-                        f"[VERBOSE] ✗ Best video score ({best_score:.2f}) is below minimum threshold ({self.scorer.min_score})"
-                    )
-                    logger.info(f"[VERBOSE] ✗ Rejected: {best.get('title')}")
-                logger.warning(
-                    f"No video found with acceptable score (best: {best_score:.2f}, minimum: {self.scorer.min_score})"
-                )
-                return None
-
-            if self.verbose:
-                logger.info(
-                    f"[VERBOSE] ✓ Selected video: {best.get('title')} (score: {best_score:.2f})"
-                )
-                logger.info(f"[VERBOSE] ✓ Video ID: {best.get('id')}")
-            return best
-
-        return None
-
-    def create_strm_file(
+    def create_strm_file_for_episode(
         self,
         series: Series,
         episode: Episode,
@@ -1200,7 +694,7 @@ class Downloader:
                 "no_warnings": True,
                 "ignoreerrors": True,
                 "sleep_requests": 1,  # Sleep 1 second between requests to avoid 429 errors
-                "sleep_subtitles": 1,  # Sleep 1 second before downloading subtitles
+                "sleep_subtitles": 3,  # Sleep 3 seconds before downloading subtitles
                 "postprocessors": [
                     {
                         "key": "FFmpegSubtitlesConvertor",
@@ -1308,7 +802,7 @@ class Downloader:
 
         # If STRM mode is enabled, create STRM file instead of downloading
         if self.use_strm_files:
-            return self.create_strm_file(
+            return self.create_strm_file_for_episode(
                 series, episode, output_directory, youtube_url, dry_run=dry_run
             )
 
@@ -1323,7 +817,7 @@ class Downloader:
             # Sleep options to avoid 429 errors (Too Many Requests)
             "sleep_interval": 2,  # Sleep 2 seconds between downloads
             "sleep_requests": 1,  # Sleep 1 second between requests
-            "sleep_subtitles": 1,  # Sleep 1 second before downloading subtitles
+            "sleep_subtitles": 3,  # Sleep 3 seconds before downloading subtitles
             # Subtitle options - improved
             "writesubtitles": True,  # Download manual subtitles
             "writeautomaticsub": True,  # Download auto-generated subtitles as fallback
@@ -1360,6 +854,9 @@ class Downloader:
 
         for attempt in range(max_retries):
             try:
+                print(
+                    f"[Download] Attempt {attempt + 1}/{max_retries} for: {youtube_url}"
+                )
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(youtube_url, download=True)
 
@@ -1397,6 +894,9 @@ class Downloader:
                         import time
 
                         delay = base_delay * (2**attempt)
+                        print(
+                            f"[Download] Rate limit error, retrying in {delay}s... (attempt {attempt + 2}/{max_retries})"
+                        )
                         logger.warning(
                             f"Rate limit error, retrying in {delay}s... (attempt {attempt + 1}/{max_retries})"
                         )
@@ -1438,10 +938,15 @@ class Downloader:
         Returns:
             Tuple (success, file_path, error_message, video_info)
         """
-        # Check if file already exists
-        existing_files = list(output_directory.glob(f"{base_filename}.*"))
+        # Check if file already exists (exclude .part and .nfo files)
+        video_extensions = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"}
+        existing_files = [
+            f
+            for f in output_directory.glob(f"{base_filename}.*")
+            if f.suffix in video_extensions and not f.name.endswith(".part")
+        ]
 
-        # If not force mode and files exist, just return
+        # If not force mode and valid files exist, just return
         if existing_files and not force and not dry_run:
             logger.info(f"File already exists: {existing_files[0].name}")
             return True, str(existing_files[0]), None, None
@@ -1490,13 +995,20 @@ class Downloader:
             "no_warnings": False,
             "sleep_interval": 2,
             "sleep_requests": 1,
-            "sleep_subtitles": 1,
+            "sleep_subtitles": 3,
             "writesubtitles": True,
             "writeautomaticsub": True,
             "subtitleslangs": self.subtitle_languages,
+            "continuedl": True,  # Resume partial downloads
+            "noprogress": False,
             "allsubtitles": self.download_all_subtitles,
             "subtitlesformat": "srt",
-            "ignoreerrors": True,
+            "ignore_no_formats_error": True,  # Don't fail if subtitle format unavailable
+            "skip_unavailable_fragments": True,  # Skip unavailable subtitle fragments
+            "ignoreerrors": "only_download",  # Ignore subtitle errors but not video errors
+            "fragment_retries": 10,  # Retry fragments (parts of video) up to 10 times
+            "retries": 10,  # Retry failed downloads up to 10 times
+            "file_access_retries": 3,  # Retry file access operations
             "postprocessors": [
                 {
                     "key": "FFmpegSubtitlesConvertor",
@@ -1516,15 +1028,87 @@ class Downloader:
         else:
             logger.info(f"Downloading from: {youtube_url}")
 
+        # First, get video info to check available subtitles (avoids 429 errors on unavailable languages)
+        try:
+            info_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+            }
+            with yt_dlp.YoutubeDL(info_opts) as info_ydl:
+                video_info = info_ydl.extract_info(youtube_url, download=False)
+
+                # Get available subtitle languages
+                available_subs = set()
+                if video_info:
+                    if video_info.get("subtitles"):
+                        available_subs.update(video_info["subtitles"].keys())
+                    if video_info.get("automatic_captions"):
+                        available_subs.update(video_info["automatic_captions"].keys())
+
+                # Filter requested languages to only those available
+                if available_subs:
+                    requested_langs = set(self.subtitle_languages)
+                    available_requested = requested_langs.intersection(available_subs)
+
+                    if available_requested:
+                        # Only request exact matches to avoid 429 on unavailable languages
+                        ydl_opts["subtitleslangs"] = list(available_requested)
+                        if self.verbose:
+                            logger.info(
+                                f"[VERBOSE] Available subtitles: {', '.join(sorted(available_subs))}"
+                            )
+                            logger.info(
+                                f"[VERBOSE] Requesting only available: {', '.join(sorted(available_requested))}"
+                            )
+                    else:
+                        # No matching subtitles, disable subtitle download to avoid 429
+                        ydl_opts["writesubtitles"] = False
+                        ydl_opts["writeautomaticsub"] = False
+                        if self.verbose:
+                            logger.info(
+                                "[VERBOSE] No requested subtitles available, skipping subtitle download"
+                            )
+                else:
+                    # No subtitles at all
+                    ydl_opts["writesubtitles"] = False
+                    ydl_opts["writeautomaticsub"] = False
+                    if self.verbose:
+                        logger.info("[VERBOSE] No subtitles available for this video")
+        except Exception as e:
+            # If we can't get info, continue with original settings
+            if self.verbose:
+                logger.warning(f"[VERBOSE] Could not pre-check subtitles: {e}")
+
+        # Small delay after subtitle check to avoid immediate rate limiting
+        import time
+
+        time.sleep(2)
+
         # Retry logic with exponential backoff
         max_retries = 5
         base_delay = 2
         last_error = None
+        tried_fallback_format = False
 
         for attempt in range(max_retries):
             try:
+                # Clean up .part files before retry to avoid corruption issues
+                if attempt > 0:
+                    self._cleanup_part_files(output_directory, base_filename)
+                    if self.verbose:
+                        logger.info(
+                            f"[VERBOSE] Retry attempt {attempt + 1}/{max_retries}"
+                        )
+
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(youtube_url, download=True)
+
+                    # Check if download was actually successful
+                    if not info:
+                        raise Exception(
+                            "No video info returned - download may have failed"
+                        )
 
                     ext = info.get("ext", "mp4")
                     final_file = output_directory / f"{base_filename}.{ext}"
@@ -1536,9 +1120,11 @@ class Downloader:
                             logger.info(f"Download successful: {final_file}")
                         return True, str(final_file), None, info
                     else:
-                        error_msg = "Downloaded file not found"
-                        logger.error(error_msg)
-                        return False, None, error_msg, None
+                        # File not found - might be a rate limit or download failure
+                        # Check for common error indicators in the process
+                        raise Exception(
+                            "Downloaded file not found - download may have been blocked"
+                        )
 
             except Exception as e:
                 last_error = e
@@ -1550,13 +1136,30 @@ class Downloader:
                     or "429" in error_str
                     or "too many" in error_str
                 ):
+                    # Clean up .part files immediately after error
+                    self._cleanup_part_files(output_directory, base_filename)
+
                     if attempt < max_retries - 1:
                         import time
 
                         delay = base_delay * (2**attempt)
-                        logger.warning(
-                            f"Rate limit error, retrying in {delay}s... (attempt {attempt + 1}/{max_retries})"
-                        )
+
+                        # After 2 failed attempts with 403, try a simpler format
+                        if (
+                            "403" in error_str
+                            and attempt >= 2
+                            and not tried_fallback_format
+                        ):
+                            ydl_opts["format"] = "best[ext=mp4]/best"
+                            tried_fallback_format = True
+                            logger.warning(
+                                "403 Forbidden - trying simpler format: best[ext=mp4]/best"
+                            )
+                        else:
+                            logger.warning(
+                                f"Rate limit error, retrying in {delay}s... (attempt {attempt + 1}/{max_retries})"
+                            )
+
                         time.sleep(delay)
                         continue
                     else:
@@ -1566,68 +1169,15 @@ class Downloader:
                 else:
                     error_msg = f"Download error: {str(e)}"
                     logger.error(error_msg)
+                    # Clean up any .part files left behind
+                    self._cleanup_part_files(output_directory, base_filename)
                     return False, None, error_msg, None
 
         error_msg = f"Download error: {last_error}"
         logger.error(error_msg)
+        # Clean up any .part files left behind
+        self._cleanup_part_files(output_directory, base_filename)
         return False, None, error_msg, None
-
-    def file_exists(
-        self, series: Series, episode: Episode, output_directory: Path
-    ) -> bool:
-        """Check if a file already exists for this episode"""
-        base_filename = self.build_jellyfin_filename(series, episode)
-        existing_files = list(output_directory.glob(f"{base_filename}.*"))
-        return len(existing_files) > 0
-
-    def create_nfo_file(
-        self,
-        base_filename: str,
-        output_directory: Path,
-        video_info: dict,
-        nfo_type: str = "episode",
-    ) -> None:
-        """
-        Create a .nfo file with video metadata for Jellyfin/Kodi compatibility
-
-        Args:
-            base_filename: Base filename (without extension)
-            output_directory: Directory where the NFO file should be saved
-            video_info: Dictionary containing video metadata from yt-dlp
-            nfo_type: Type of NFO file - "episode" for episodedetails, "movie" for movie format
-        """
-        nfo_path = output_directory / f"{base_filename}.nfo"
-
-        # Determine root element based on type
-        root_element = "episodedetails" if nfo_type == "episode" else "movie"
-
-        # Escape all text content for XML safety
-        title = self._escape_xml(video_info.get("title", "Unknown"))
-        description = self._escape_xml(video_info.get("description", ""))
-        channel = self._escape_xml(video_info.get("channel", ""))
-        uploader = self._escape_xml(video_info.get("uploader", ""))
-        video_id = self._escape_xml(video_info.get("id", ""))
-        video_url = self._escape_xml(
-            video_info.get("webpage_url", video_info.get("url", ""))
-        )
-
-        try:
-            with open(nfo_path, "w", encoding="utf-8") as nfo:
-                nfo.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
-                nfo.write(f"<{root_element}>\n")
-                nfo.write(f"  <title>{title}</title>\n")
-                nfo.write(f"  <originaltitle>{title}</originaltitle>\n")
-                nfo.write(f"  <studio>{channel}</studio>\n")
-                nfo.write(f"  <director>{uploader}</director>\n")
-                nfo.write("  <source>YouTube</source>\n")
-                nfo.write(f"  <id>{video_id}</id>\n")
-                nfo.write(f"  <youtubeurl>{video_url}</youtubeurl>\n")
-                if video_info.get("duration"):
-                    nfo.write(f"  <runtime>{video_info['duration'] // 60}</runtime>\n")
-                nfo.write(f"</{root_element}>\n")
-            logger.info(f"Created NFO file: {nfo_path}")
-        except Exception as e:
-            logger.warning(f"Failed to create NFO file: {e}")
 
     def get_episode_file_info(
         self, series: Series, episode: Episode, output_directory: Path
@@ -1722,57 +1272,3 @@ class Downloader:
                 info["subtitle_count"] = info["subtitle_count"] + 1
 
         return info
-
-    def get_movie_directory(
-        self,
-        movie: Movie,
-        media_directory: str | None = None,
-        radarr_directory: str | None = None,
-    ) -> Path:
-        """
-        Determine the target directory for the movie extras
-
-        If media_directory and radarr_directory are provided, do path mapping
-        Otherwise use Radarr path directly
-        """
-        if media_directory and radarr_directory:
-            # Map between Radarr path and real path
-            radarr_path = Path(movie.path)
-            try:
-                # Replace Radarr root with real root
-                relative_path = radarr_path.relative_to(radarr_directory)
-                real_path = Path(media_directory) / relative_path
-            except ValueError:
-                # If path is not relative to radarr_directory, use as-is
-                logger.warning(f"Cannot map path for {movie.path}")
-                real_path = Path(movie.path)
-        else:
-            real_path = Path(movie.path)
-
-        # Create extras directory if it doesn't exist
-        extras_dir = real_path / "extras"
-        extras_dir.mkdir(parents=True, exist_ok=True)
-
-        return extras_dir
-
-    def get_movie_extras_directory(
-        self,
-        movie: Movie,
-        media_directory: str | None = None,
-        radarr_directory: str | None = None,
-    ) -> Path:
-        """Alias for get_movie_directory for consistency with get_extras_directory"""
-        return self.get_movie_directory(movie, media_directory, radarr_directory)
-
-    def build_movie_extras_filename(self, movie: Movie, video_title: str) -> str:
-        """
-        Build a filename for movie extras
-        Format: MovieName (Year) - ExtraTitle.ext
-        """
-        movie_name = self.sanitize_filename(movie.title)
-        extra_title = self.sanitize_filename(video_title)
-
-        year_str = f" ({movie.year})" if movie.year else ""
-        filename = f"{movie_name}{year_str} - {extra_title}"
-
-        return filename

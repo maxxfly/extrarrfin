@@ -1,3 +1,16 @@
+# Movie extras search keywords (customizable, optional)
+# Used for YouTube searches in tag mode for movies
+# If not set, defaults are used (see config.py)
+movie_extras_keywords:
+  - "behind the scenes"
+  - "making of"
+  - "featurette"
+  - "interviews"
+  - "deleted scenes"
+  - "bloopers"
+  - "vfx"
+  - "special effects"
+  - "visual effects"
 # ExtrarrFin Configuration
 
 # === SONARR (TV Series) ===
@@ -76,12 +89,11 @@ schedule_unit: "hours"
 # Subtitle configuration
 # Languages to download (in order of priority)
 # Use ISO 639-1 codes (fr, en, de, es, etc.) or with region (fr-FR, en-US, en-GB)
+# Note: Requesting too many languages may trigger YouTube rate limiting (429 errors)
+# Recommended: Keep to 2-3 languages maximum
 subtitle_languages:
   - "fr"
   - "en"
-  - "fr-FR"
-  - "en-US"
-  - "en-GB"
 
 # Download all available subtitles (ignores subtitle_languages if true)
 download_all_subtitles: false

@@ -3,7 +3,6 @@ Data models for ExtrarrFin
 """
 
 from dataclasses import dataclass
-from typing import List
 
 
 @dataclass
@@ -38,11 +37,11 @@ class Series:
     title: str
     path: str
     monitored: bool
-    seasons: List[Season]
+    seasons: list[Season]
     year: int | None = None
     tvdb_id: int | None = None
     network: str | None = None
-    tags: List[int] | None = None  # List of tag IDs from Sonarr
+    tags: list[int] | None = None  # List of tag IDs from Sonarr
 
 
 @dataclass
@@ -56,7 +55,7 @@ class Movie:
     year: int | None = None
     tmdb_id: int | None = None
     studio: str | None = None
-    tags: List[int] | None = None  # List of tag IDs from Radarr
+    tags: list[int] | None = None  # List of tag IDs from Radarr
     has_file: bool = False
 
 

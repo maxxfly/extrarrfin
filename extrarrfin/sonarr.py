@@ -3,59 +3,30 @@ Sonarr API Client
 """
 
 import logging
-from typing import List
+from typing import Any
 
-import requests
-
+from .base_client import BaseArrClient
 from .models import Episode, Season, Series
 
 logger = logging.getLogger(__name__)
 
 
-class SonarrClient:
+class SonarrClient(BaseArrClient[Series]):
     """Client to interact with Sonarr API"""
 
-    def __init__(self, url: str, api_key: str):
-        self.url = url.rstrip("/")
-        self.api_key = api_key
-        self.session = requests.Session()
-        self.session.headers.update(
-            {"X-Api-Key": api_key, "Content-Type": "application/json"}
-        )
-        # Cache for tags
-        self._tags_cache: dict[int, str] | None = None
+    def get_all_items(self) -> list[Series]:
+        """Fetch all series (alias for get_all_series)"""
+        return self.get_all_series()
 
-    def _get(self, endpoint: str, params: dict | None = None) -> dict:
-        """Perform a GET request to the API"""
-        url = f"{self.url}/api/v3/{endpoint}"
-        response = self.session.get(url, params=params)
-        response.raise_for_status()
-        return response.json()
+    def get_monitored_items(self) -> list[Series]:
+        """Fetch all monitored series (alias for get_monitored_series)"""
+        return self.get_monitored_series()
 
-    def _post(self, endpoint: str, data: dict) -> dict:
-        """Perform a POST request to the API"""
-        url = f"{self.url}/api/v3/{endpoint}"
-        response = self.session.post(url, json=data)
-        response.raise_for_status()
-        return response.json()
+    def rescan(self, item_id: int) -> Any:
+        """Trigger a rescan for a specific series"""
+        return self.rescan_series(item_id)
 
-    def _put(self, endpoint: str, data: dict) -> dict:
-        """Perform a PUT request to the API"""
-        url = f"{self.url}/api/v3/{endpoint}"
-        response = self.session.put(url, json=data)
-        response.raise_for_status()
-        return response.json()
-
-    def get_all_tags(self) -> dict[int, str]:
-        """Fetch all tags and return a mapping of tag_id -> tag_label"""
-        if self._tags_cache is not None:
-            return self._tags_cache
-
-        data = self._get("tag")
-        self._tags_cache = {tag["id"]: tag["label"] for tag in data}
-        return self._tags_cache
-
-    def get_all_series(self) -> List[Series]:
+    def get_all_series(self) -> list[Series]:
         """Fetch all series"""
         data = self._get("series")
         series_list = []
@@ -85,16 +56,16 @@ class SonarrClient:
 
         return series_list
 
-    def get_monitored_series(self) -> List[Series]:
+    def get_monitored_series(self) -> list[Series]:
         """Fetch all monitored series"""
         all_series = self.get_all_series()
         return [s for s in all_series if s.monitored]
 
     def get_series_episodes(
         self, series_id: int, season_number: int | None = None
-    ) -> List[Episode]:
+    ) -> list[Episode]:
         """Fetch episodes for a series"""
-        params = {"seriesId": series_id}
+        params: dict[str, Any] = {"seriesId": series_id}
         if season_number is not None:
             params["seasonNumber"] = season_number
 
@@ -117,7 +88,7 @@ class SonarrClient:
 
         return episodes
 
-    def get_season_zero_episodes(self, series_id: int) -> List[Episode]:
+    def get_season_zero_episodes(self, series_id: int) -> list[Episode]:
         """Fetch season 0 episodes (specials)"""
         return self.get_series_episodes(series_id, season_number=0)
 
@@ -139,56 +110,14 @@ class SonarrClient:
             )
             return False
 
-    def rescan_series(self, series_id: int):
+    def rescan_series(self, series_id: int) -> Any:
         """Trigger a series scan in Sonarr"""
         logger.info(f"Triggering scan for series ID {series_id}")
         try:
             data = {"name": "RescanSeries", "seriesId": series_id}
-            self._post("command", data)
+            result = self._post("command", data)
             logger.info(f"Scan successfully triggered for series ID {series_id}")
+            return result
         except Exception as e:
             logger.error(f"Error triggering scan: {e}")
             raise
-
-    def refresh_series(self, series_id: int):
-        """Refresh series metadata"""
-        logger.info(f"Refreshing metadata for series ID {series_id}")
-        try:
-            data = {"name": "RefreshSeries", "seriesId": series_id}
-            self._post("command", data)
-            logger.info(f"Refresh triggered for series ID {series_id}")
-        except Exception as e:
-            logger.error(f"Error during refresh: {e}")
-            raise
-
-    def rename_files(self, series_id: int, season_number: int):
-        """Rename files according to Sonarr rules"""
-        logger.info(f"Renaming files for series {series_id}, season {season_number}")
-        try:
-            # Get series files
-            episodes = self.get_series_episodes(series_id, season_number)
-            file_ids = [ep.id for ep in episodes if ep.has_file]
-
-            if file_ids:
-                data = {"name": "RenameFiles", "seriesId": series_id, "files": file_ids}
-                self._post("command", data)
-                logger.info(f"Rename triggered for {len(file_ids)} files")
-        except Exception as e:
-            logger.error(f"Error during rename: {e}")
-            raise
-
-    def has_want_extras_tag(self, series: Series) -> bool:
-        """Check if series has 'want-extras' or 'want_extras' tag"""
-        if not series.tags:
-            return False
-
-        # Get all tags to map IDs to labels
-        all_tags = self.get_all_tags()
-
-        # Check if any of the series tags match want-extras or want_extras
-        for tag_id in series.tags:
-            tag_label = all_tags.get(tag_id, "").lower()
-            if tag_label in ["want-extras", "want_extras"]:
-                return True
-
-        return False

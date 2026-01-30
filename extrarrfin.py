@@ -9,8 +9,6 @@ import time
 import click
 import schedule
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.table import Table
 
 from extrarrfin.cli_config import (
     load_config_from_args,
@@ -28,7 +26,7 @@ from extrarrfin.downloader import Downloader
 from extrarrfin.jellyfin import JellyfinClient
 from extrarrfin.radarr import RadarrClient
 from extrarrfin.sonarr import SonarrClient
-from extrarrfin.utils import format_episode_info, setup_logging
+from extrarrfin.utils import setup_logging
 
 logger = logging.getLogger(__name__)
 console = Console()

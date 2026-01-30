@@ -60,10 +60,10 @@ def test_command(
                 monitored_movies = [m for m in movies if m.monitored]
                 console.print(f"Monitored movies: {len(monitored_movies)}")
 
-                with_tag = [
+                movies_with_tag = [
                     m for m in monitored_movies if radarr.has_want_extras_tag(m)
                 ]
-                console.print(f"With want-extras tag: {len(with_tag)}")
+                console.print(f"With want-extras tag: {len(movies_with_tag)}")
             except Exception as e:
                 console.print(f"[red]✗ Radarr connection error:[/red] {e}")
         else:

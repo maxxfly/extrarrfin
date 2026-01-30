@@ -5,6 +5,7 @@ Configuration management
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -40,6 +41,20 @@ class Config:
     # YouTube search options
     min_score: float = 50.0  # Minimum score to accept a video match
     youtube_search_results: int = 10  # Number of YouTube results to fetch (5-20)
+    # Movie extras search keywords (configurable)
+    movie_extras_keywords: list = field(
+        default_factory=lambda: [
+            "behind the scenes",
+            "making of",
+            "featurette",
+            "interviews",
+            "deleted scenes",
+            "bloopers",
+            "vfx",
+            "special effects",
+            "visual effects",
+        ]
+    )
 
     @classmethod
     def from_file(cls, config_path: Path) -> "Config":
@@ -55,7 +70,7 @@ class Config:
     @classmethod
     def from_env_and_file(cls, config_path: Path | None = None) -> "Config":
         """Load configuration from file and/or environment variables"""
-        config_data = {}
+        config_data: dict[str, Any] = {}
 
         # Load from file if specified
         if config_path and config_path.exists():

@@ -473,3 +473,349 @@ class VideoScorer:
             logger.info(f"[VERBOSE] ✓ Video ID: {best.get('id')}")
 
         return best
+
+    def score_behind_scenes_videos(
+        self,
+        videos: list,
+        series: Series,
+        min_score: float = 65.0,
+        max_results: int = 20,
+    ) -> list[dict]:
+        """
+        Score behind the scenes video results based on title matching
+
+        Scoring factors:
+        - Contains "behind the scenes" or "bts" or "making of": +50 points
+        - Contains series title: +40 points
+        - Network in title (official content): +50 points
+        - Channel matches network: +50 points
+        - Known BTS content channels: +35 points
+        - Word match ratio: +30 points max
+        - Official/verified channel indicators: +20 points
+        - Shorter title (less extra content): +15 points max
+
+        Penalties:
+        - Other movie/series titles before series name: -80 points
+        - Unrelated channel types: -50 points
+        - Unrelated content indicators: -30 points
+
+        Returns videos with score >= min_score, sorted by score (highest first)
+        """
+        if not videos:
+            return []
+
+        scored_videos = []
+
+        # Known channels that specialize in BTS/behind-the-scenes content
+        known_bts_channels = [
+            "filmisnow",
+            "rotten tomatoes",
+            "ign",
+            "entertainment weekly",
+            "collider",
+            "comicbook.com",
+            "screen rant",
+            "variety",
+            "the hollywood reporter",
+            "deadline",
+            "den of geek",
+            "syfy",
+            "nerdist",
+            "movie trailers source",
+            "joblo",
+        ]
+
+        # Normalize strings for comparison
+        series_lower = series.title.lower()
+        network_lower = series.network.lower() if series.network else None
+
+        if self.verbose and network_lower:
+            logger.info(f"[VERBOSE] Series network: {series.network}")
+
+        for video in videos:
+            if not video:
+                continue
+
+            title = video.get("title", "")
+            title_lower = title.lower()
+            channel = video.get("channel", "")
+            channel_lower = channel.lower()
+            score: float = 0
+
+            # Contains behind the scenes / bts / making of (essential for this mode)
+            if any(
+                phrase in title_lower
+                for phrase in [
+                    "behind the scenes",
+                    "behind the scene",
+                    "bts",
+                    "making of",
+                    "making-of",
+                    "backstage",
+                    "featurette",
+                ]
+            ):
+                score += 50
+
+            # Bonus for VFX/technical breakdown content (interesting BTS content)
+            if any(
+                phrase in title_lower
+                for phrase in ["vfx breakdown", "breakdown", "visual effects"]
+            ):
+                score += 40
+                if self.verbose:
+                    logger.info("[VERBOSE] VFX/Breakdown bonus applied")
+
+            # Contains series title
+            if series_lower in title_lower:
+                score += 40
+
+                # Additional bonus for character/actor focused BTS content
+                if any(
+                    phrase in title_lower
+                    for phrase in [":", "with", "interview", "character"]
+                ) and any(
+                    bts in title_lower
+                    for bts in ["behind the scenes", "behind the scene", "bts"]
+                ):
+                    score += 15
+                    if self.verbose:
+                        logger.info("[VERBOSE] Character/actor BTS bonus applied")
+
+            # Bonus if network name appears in title (indicates official content)
+            if network_lower and network_lower in title_lower:
+                score += 50
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] Network in title bonus: {series.network} found in title"
+                    )
+
+            # Check if channel matches the network (increased bonus)
+            if network_lower and channel:
+                if network_lower in channel_lower or channel_lower in network_lower:
+                    score += 50
+                    if self.verbose:
+                        logger.info(
+                            f"[VERBOSE] Network match bonus: {channel} ~ {series.network}"
+                        )
+                elif len(network_lower) <= 5 and network_lower in channel_lower.split():
+                    score += 50
+                    if self.verbose:
+                        logger.info(
+                            f"[VERBOSE] Network abbreviation match: {channel} ~ {series.network}"
+                        )
+            else:
+                # Check if it's a known BTS content channel
+                if any(
+                    known_channel in channel_lower
+                    for known_channel in known_bts_channels
+                ):
+                    score += 40
+                    if self.verbose:
+                        logger.info(f"[VERBOSE] Known BTS channel bonus: {channel}")
+                # Penalize videos from unrelated channels
+                elif network_lower and channel and series_lower in title_lower:
+                    unrelated_keywords = [
+                        "school",
+                        "university",
+                        "college",
+                        "fashion brand",
+                        "prada",
+                        "museum",
+                        "art gallery",
+                        "foundation (charity)",
+                        "sixth form",
+                        "centre",
+                    ]
+                    if any(keyword in channel_lower for keyword in unrelated_keywords):
+                        score -= 50
+                        if self.verbose:
+                            logger.info(
+                                f"[VERBOSE] Penalty: Unrelated channel type: {channel}"
+                            )
+
+            # Check title for educational/unrelated indicators
+            if "sixth form" in title_lower or (
+                "durham" in title_lower and "art foundation" in title_lower
+            ):
+                score -= 60
+                if self.verbose:
+                    logger.info(
+                        "[VERBOSE] Penalty: Educational/unrelated content in title"
+                    )
+
+            # Word matching ratio
+            series_words = set(series.title.lower().split())
+            title_words = set(title_lower.split())
+            common_words = series_words & title_words
+            if series_words:
+                word_ratio = len(common_words) / len(series_words)
+                score += word_ratio * 30
+
+            # Check for official/quality indicators
+            title_and_channel = (title + " " + channel).lower()
+            if any(
+                word in title_and_channel for word in ["official", "vevo", "verified"]
+            ):
+                score += 20
+
+            # Prefer shorter titles (less likely to be compilations)
+            title_length = len(title)
+            if title_length < 100:
+                score += 15 * (1 - title_length / 100)
+
+            # PENALTIES: Detect if another title appears BEFORE the series name
+            if series_lower in title_lower:
+                series_position = title_lower.find(series_lower)
+                title_before_series = title_lower[:series_position].strip()
+
+                if title_before_series:
+                    original_before = title[:series_position].strip()
+                    capitalized_words = sum(
+                        1
+                        for word in original_before.split()
+                        if word and word[0].isupper()
+                    )
+                    if capitalized_words >= 2:
+                        score -= 80
+                        if self.verbose:
+                            logger.info(
+                                f"[VERBOSE] Penalty: Possible other title before series name: '{original_before}'"
+                            )
+
+            # Penalize certain patterns that indicate wrong content
+            penalty_patterns = [
+                "compilation",
+                "playlist",
+                "all episodes",
+                "full series",
+                "reaction",
+                "review",
+                "unboxing",
+                "gameplay",
+                "walkthrough",
+                "interview only",
+                "cast interview",
+                "ending explained",
+                "theories",
+            ]
+            if any(word in title_lower for word in penalty_patterns):
+                score -= 30
+
+            # Penalize trailers if they don't explicitly mention BTS content
+            if "trailer" in title_lower:
+                has_bts = any(
+                    phrase in title_lower
+                    for phrase in [
+                        "behind the scenes",
+                        "behind the scene",
+                        "bts",
+                        "making of",
+                        "featurette",
+                    ]
+                )
+                if not has_bts:
+                    score -= 40
+                    if self.verbose:
+                        logger.info("[VERBOSE] Penalty: Trailer without BTS content")
+
+            if self.verbose:
+                logger.info(f"[VERBOSE] Video '{title}' scored {score:.2f} points")
+
+            # Store the score and keep video if it meets minimum
+            if score >= min_score:
+                video["_score"] = score
+                scored_videos.append(video)
+
+        # Sort by score (highest first)
+        scored_videos.sort(key=lambda v: v.get("_score", 0), reverse=True)
+
+        # Remove duplicates based on title similarity and duration
+        scored_videos = self.remove_duplicate_videos(scored_videos)
+
+        # Limit to max_results best videos
+        if len(scored_videos) > max_results:
+            scored_videos = scored_videos[:max_results]
+
+        if self.verbose and scored_videos:
+            logger.info(
+                f"[VERBOSE] Found {len(scored_videos)} videos above minimum score {min_score}"
+            )
+
+        return scored_videos
+
+    def remove_duplicate_videos(self, videos: list[dict]) -> list[dict]:
+        """
+        Remove duplicate videos based on title similarity and duration proximity
+        Keeps the video with the highest score among duplicates
+
+        Two videos are considered duplicates if:
+        - Title similarity > 80% (based on word overlap)
+        - Duration difference < 10% or < 30 seconds
+        """
+        if not videos:
+            return []
+
+        unique_videos: list[dict] = []
+
+        for video in videos:
+            is_duplicate = False
+            video_title = video.get("title", "").lower()
+            video_duration = video.get("duration", 0)
+
+            # Normalize title for comparison
+            video_words = set(
+                word.strip(".,!?-—|:;()[]")
+                for word in video_title.split()
+                if len(word) > 2 and word not in ["the", "and", "for", "with", "from"]
+            )
+
+            for existing in unique_videos:
+                existing_title = existing.get("title", "").lower()
+                existing_duration = existing.get("duration", 0)
+
+                existing_words = set(
+                    word.strip(".,!?-—|:;()[]")
+                    for word in existing_title.split()
+                    if len(word) > 2
+                    and word not in ["the", "and", "for", "with", "from"]
+                )
+
+                # Calculate title similarity (Jaccard similarity)
+                if video_words and existing_words:
+                    common_words = video_words & existing_words
+                    all_words = video_words | existing_words
+                    similarity = len(common_words) / len(all_words) if all_words else 0
+                else:
+                    similarity = 0
+
+                # Check duration proximity
+                duration_similar = False
+                if video_duration and existing_duration:
+                    duration_diff = abs(video_duration - existing_duration)
+                    duration_ratio = duration_diff / max(
+                        video_duration, existing_duration
+                    )
+                    duration_similar = duration_diff < 30 or duration_ratio < 0.1
+
+                # Consider it a duplicate if titles are very similar
+                # OR if titles are somewhat similar AND durations are close
+                if similarity > 0.8 or (similarity > 0.6 and duration_similar):
+                    is_duplicate = True
+                    if self.verbose:
+                        logger.info(
+                            f"[VERBOSE] Duplicate detected: '{video.get('title')}' "
+                            f"(similarity: {similarity:.2f}, duration diff: {abs(video_duration - existing_duration)}s) "
+                            f"vs '{existing.get('title')}'"
+                        )
+                    break
+
+            if not is_duplicate:
+                unique_videos.append(video)
+
+        if self.verbose and len(unique_videos) < len(videos):
+            logger.info(
+                f"[VERBOSE] Removed {len(videos) - len(unique_videos)} duplicate(s)"
+            )
+
+        return unique_videos
