@@ -336,7 +336,9 @@ class Downloader:
                 pass
 
             # Fallback: scrape the show page for a direct MP3 URL
-            page_resp = requests.get(show_url, timeout=10, headers=_HEADERS, verify=False)
+            page_resp = requests.get(
+                show_url, timeout=10, headers=_HEADERS, verify=False
+            )
             if page_resp.status_code != 200:
                 return (
                     False,
