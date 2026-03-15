@@ -178,9 +178,15 @@ class Downloader:
         try:
             subprocess.run(
                 [
-                    "ffmpeg", "-y",
-                    "-i", str(leftover),
-                    "-vn", "-acodec", "libmp3lame", "-ab", "192k",
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(leftover),
+                    "-vn",
+                    "-acodec",
+                    "libmp3lame",
+                    "-ab",
+                    "192k",
                     str(theme_file),
                 ],
                 check=True,
