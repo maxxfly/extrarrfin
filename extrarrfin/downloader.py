@@ -140,6 +140,7 @@ class Downloader:
         self,
         url: str,
         output_dir: Path,
+        nocheckcertificate: bool = False,
     ) -> Tuple[bool, str | None, str | None]:
         """Download audio from *url* via yt-dlp and convert to theme.mp3."""
         theme_file = output_dir / "theme.mp3"
@@ -151,6 +152,7 @@ class Downloader:
             "quiet": not self.verbose,
             "no_warnings": not self.verbose,
             "sleep_requests": 1,
+            "nocheckcertificate": nocheckcertificate,
             "postprocessors": [
                 {
                     "key": "FFmpegExtractAudio",
@@ -329,7 +331,9 @@ class Downloader:
 
             # Try yt-dlp generic extractor first
             try:
-                ok, path, err = self._download_audio_from_url(show_url, output_dir)
+                ok, path, err = self._download_audio_from_url(
+                    show_url, output_dir, nocheckcertificate=True
+                )
                 if ok:
                     return ok, path, err
             except Exception:
