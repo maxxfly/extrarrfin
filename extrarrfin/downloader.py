@@ -5,9 +5,11 @@ Download module via yt-dlp with Jellyfin formatting
 import logging
 import re
 import subprocess
+import urllib.parse
 from pathlib import Path
 from typing import Tuple
 
+import requests
 import yt_dlp
 
 from .downloader_utils.nfo import NFOWriter
@@ -134,33 +136,266 @@ class Downloader:
             movie, media_directory, radarr_directory
         )
 
-    def download_theme(
+    def _download_audio_from_url(
+        self,
+        url: str,
+        output_dir: Path,
+    ) -> Tuple[bool, str | None, str | None]:
+        """Download audio from *url* via yt-dlp and convert to theme.mp3."""
+        theme_file = output_dir / "theme.mp3"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "outtmpl": str(output_dir / "theme.%(ext)s"),
+            "quiet": not self.verbose,
+            "no_warnings": not self.verbose,
+            "sleep_requests": 1,
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }
+            ],
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        if theme_file.exists():
+            return True, str(theme_file), None
+
+        # Fallback: yt-dlp postprocessor may have left the file in its
+        # original container (e.g. theme.webm). Convert with ffmpeg.
+        leftover = next(
+            (f for f in output_dir.glob("theme.*") if f.suffix != ".mp3"),
+            None,
+        )
+        if leftover:
+            logger.info(
+                f"FFmpegExtractAudio did not produce theme.mp3; "
+                f"converting {leftover.name} with ffmpeg"
+            )
+            try:
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        str(leftover),
+                        "-vn",
+                        "-acodec",
+                        "libmp3lame",
+                        "-ab",
+                        "192k",
+                        str(theme_file),
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+                leftover.unlink(missing_ok=True)
+            except subprocess.CalledProcessError as conv_err:
+                logger.error(
+                    f"ffmpeg fallback conversion failed: {conv_err.stderr.decode()}"
+                )
+
+        if theme_file.exists():
+            return True, str(theme_file), None
+        return False, None, "Download completed but theme.mp3 not found"
+
+    def _try_themerrdb(
+        self,
+        title: str,
+        tvdb_id: int | None,
+        tmdb_id: int | None,
+        output_dir: Path,
+        dry_run: bool,
+    ) -> Tuple[bool, str | None, str | None]:
+        """Look up the YouTube theme URL from ThemerrDB and download it."""
+        base = "https://raw.githubusercontent.com/LizardByte/ThemerrDB/gh-pages/themes"
+        if tvdb_id:
+            lookup_url = f"{base}/tv/{tvdb_id}.json"
+            id_info = f"tvdb_id={tvdb_id}"
+        elif tmdb_id:
+            lookup_url = f"{base}/movies/{tmdb_id}.json"
+            id_info = f"tmdb_id={tmdb_id}"
+        else:
+            return False, None, "ThemerrDB: no TVDB/TMDB ID available"
+
+        try:
+            resp = requests.get(lookup_url, timeout=10)
+            if resp.status_code != 200:
+                return (
+                    False,
+                    None,
+                    f"ThemerrDB: not found for {id_info} (HTTP {resp.status_code})",
+                )
+
+            data = resp.json()
+            yt_url = data.get("youtube_theme_url")
+            if not yt_url:
+                return (
+                    False,
+                    None,
+                    f"ThemerrDB: no youtube_theme_url in response for '{title}'",
+                )
+
+            logger.info(f"ThemerrDB: found theme for '{title}': {yt_url}")
+            if dry_run:
+                theme_file = output_dir / "theme.mp3"
+                logger.info(f"DRY RUN: Would download via ThemerrDB: {yt_url}")
+                return True, str(theme_file), None
+
+            return self._download_audio_from_url(yt_url, output_dir)
+        except Exception as e:
+            return False, None, f"ThemerrDB error: {e}"
+
+    def _try_televisiontunes(
         self,
         title: str,
         output_dir: Path,
-        dry_run: bool = False,
-        force: bool = False,
-        year: int | None = None,
+        dry_run: bool,
     ) -> Tuple[bool, str | None, str | None]:
-        """
-        Search for and download the musical theme of a movie or series.
+        """Search TelevisionTunes for the theme and download it.
 
-        Searches YouTube for "main theme {title}", scores all candidates with
-        VideoScorer.score_theme_videos(), then downloads the best match
-        above min_score as theme.mp3.  Skips if theme.mp3 already exists.
-
-        Returns:
-            Tuple (success, file_path_or_None, error_message_or_None)
+        SSL verification is disabled because the site's certificate is expired.
         """
+        import urllib3  # noqa: PLC0415
+
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        _HEADERS = {
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        search_url = (
+            "https://www.televisiontunes.com/search.php?q=" + urllib.parse.quote(title)
+        )
+
+        try:
+            resp = requests.get(search_url, timeout=10, headers=_HEADERS, verify=False)
+            if resp.status_code != 200:
+                return (
+                    False,
+                    None,
+                    f"TelevisionTunes: search failed (HTTP {resp.status_code})",
+                )
+
+            # Extract show page links (relative hrefs ending in .html)
+            raw_links = re.findall(r'href="(/[^"#?]+\.html)"', resp.text)
+            noise = {
+                "search",
+                "about",
+                "contact",
+                "sitemap",
+                "index",
+                "privacy",
+                "terms",
+                "faq",
+                "signup",
+                "login",
+            }
+            show_links = [
+                lnk
+                for lnk in dict.fromkeys(raw_links)  # deduplicate, preserve order
+                if not any(n in lnk.lower() for n in noise)
+            ]
+
+            if not show_links:
+                return False, None, "TelevisionTunes: no results found"
+
+            # Pick best match by title-word overlap with the URL slug
+            title_words = set(title.lower().split())
+
+            def _link_score(link: str) -> int:
+                slug = re.sub(
+                    r"[^a-z0-9]",
+                    " ",
+                    link.replace(".html", "").split("/")[-1].replace("_", " ").lower(),
+                )
+                return len(title_words & set(slug.split()))
+
+            best_link = max(show_links[:10], key=_link_score)
+            show_url = f"https://www.televisiontunes.com{best_link}"
+            logger.info(f"TelevisionTunes: best match for '{title}' → {show_url}")
+
+            if dry_run:
+                theme_file = output_dir / "theme.mp3"
+                logger.info(f"DRY RUN: Would download from TelevisionTunes: {show_url}")
+                return True, str(theme_file), None
+
+            # Try yt-dlp generic extractor first
+            try:
+                ok, path, err = self._download_audio_from_url(show_url, output_dir)
+                if ok:
+                    return ok, path, err
+            except Exception:
+                pass
+
+            # Fallback: scrape the show page for a direct MP3 URL
+            page_resp = requests.get(show_url, timeout=10, headers=_HEADERS, verify=False)
+            if page_resp.status_code != 200:
+                return (
+                    False,
+                    None,
+                    f"TelevisionTunes: could not fetch show page "
+                    f"(HTTP {page_resp.status_code})",
+                )
+
+            mp3_matches = re.findall(r'["\']([^"\']+\.mp3)["\']', page_resp.text)
+            if not mp3_matches:
+                return False, None, "TelevisionTunes: no MP3 URL found on show page"
+
+            mp3_url = mp3_matches[0]
+            if not mp3_url.startswith("http"):
+                mp3_url = "https://www.televisiontunes.com" + (
+                    mp3_url if mp3_url.startswith("/") else f"/{mp3_url}"
+                )
+
+            logger.info(f"TelevisionTunes: downloading MP3 from {mp3_url}")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            theme_file = output_dir / "theme.mp3"
+
+            audio_resp = requests.get(
+                mp3_url, timeout=30, headers=_HEADERS, stream=True, verify=False
+            )
+            if audio_resp.status_code != 200:
+                return (
+                    False,
+                    None,
+                    f"TelevisionTunes: failed to download MP3 "
+                    f"(HTTP {audio_resp.status_code})",
+                )
+
+            with open(theme_file, "wb") as fh:
+                for chunk in audio_resp.iter_content(chunk_size=8192):
+                    fh.write(chunk)
+
+            if theme_file.exists() and theme_file.stat().st_size > 0:
+                logger.info(f"TelevisionTunes: saved theme to {theme_file}")
+                return True, str(theme_file), None
+
+            return False, None, "TelevisionTunes: download produced empty file"
+
+        except Exception as e:
+            return False, None, f"TelevisionTunes error: {e}"
+
+    def _try_youtube_theme(
+        self,
+        title: str,
+        year: int | None,
+        output_dir: Path,
+        dry_run: bool,
+    ) -> Tuple[bool, str | None, str | None]:
+        """Search YouTube for the main theme and download the best-scored match."""
         theme_file = output_dir / "theme.mp3"
-
-        if theme_file.exists() and not force:
-            logger.info(f"Theme already exists, skipping: {theme_file}")
-            return True, str(theme_file), None
-
         query = f'main theme "{title}" {year}' if year else f'main theme "{title}"'
+
         if self.verbose:
-            logger.info(f"[VERBOSE] YouTube search query: '{query}'")
+            logger.info(f"[VERBOSE] YouTube theme search query: '{query}'")
         else:
             logger.info(f"Searching YouTube for theme: {query}")
 
@@ -183,9 +418,8 @@ class Downloader:
 
             entries = [e for e in result["entries"] if e and e.get("id")]
             if not entries:
-                return False, None, "No valid video found"
+                return False, None, "No valid YouTube video found"
 
-            # Score all candidates and pick the best one
             video = self.scorer.score_theme_videos(entries, title, year=year)
             if not video:
                 return (
@@ -212,72 +446,66 @@ class Downloader:
                 logger.info(f"DRY RUN: Would save theme to {theme_file}")
                 return True, str(theme_file), None
 
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            ydl_download_opts = {
-                "format": "bestaudio/best",
-                "outtmpl": str(output_dir / "theme.%(ext)s"),
-                "quiet": not self.verbose,
-                "no_warnings": not self.verbose,
-                "sleep_requests": 1,
-                "postprocessors": [
-                    {
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "mp3",
-                        "preferredquality": "192",
-                    }
-                ],
-            }
-
-            with yt_dlp.YoutubeDL(ydl_download_opts) as ydl:
-                ydl.download([video_url])
-
-            if theme_file.exists():
-                return True, str(theme_file), None
-
-            # Fallback: yt-dlp postprocessor may have left the file in its
-            # original container (e.g. theme.webm). Convert with ffmpeg.
-            leftover = next(
-                (f for f in output_dir.glob("theme.*") if f.suffix != ".mp3"),
-                None,
-            )
-            if leftover:
-                logger.info(
-                    f"FFmpegExtractAudio did not produce theme.mp3; "
-                    f"converting {leftover.name} with ffmpeg"
-                )
-                try:
-                    subprocess.run(
-                        [
-                            "ffmpeg",
-                            "-y",
-                            "-i",
-                            str(leftover),
-                            "-vn",
-                            "-acodec",
-                            "libmp3lame",
-                            "-ab",
-                            "192k",
-                            str(theme_file),
-                        ],
-                        check=True,
-                        capture_output=True,
-                    )
-                    leftover.unlink(missing_ok=True)
-                except subprocess.CalledProcessError as conv_err:
-                    logger.error(
-                        f"ffmpeg fallback conversion failed: {conv_err.stderr.decode()}"
-                    )
-
-            if theme_file.exists():
-                return True, str(theme_file), None
-            else:
-                return False, None, "Download completed but theme.mp3 not found"
+            return self._download_audio_from_url(video_url, output_dir)
 
         except Exception as e:
-            error_msg = f"Error downloading theme: {e}"
+            error_msg = f"YouTube theme search error: {e}"
             logger.error(error_msg)
             return False, None, error_msg
+
+    def download_theme(
+        self,
+        title: str,
+        output_dir: Path,
+        dry_run: bool = False,
+        force: bool = False,
+        year: int | None = None,
+        tvdb_id: int | None = None,
+        tmdb_id: int | None = None,
+    ) -> Tuple[bool, str | None, str | None]:
+        """
+        Search for and download the musical theme of a movie or series.
+
+        Sources are tried in order:
+        1. ThemerrDB – direct lookup by TVDB/TMDB ID (most accurate)
+        2. TelevisionTunes – web search + direct MP3 download
+        3. YouTube – scored search with VideoScorer (fallback)
+
+        Returns:
+            Tuple (success, file_path_or_None, error_message_or_None)
+        """
+        theme_file = output_dir / "theme.mp3"
+
+        if theme_file.exists() and not force:
+            logger.info(f"Theme already exists, skipping: {theme_file}")
+            return True, str(theme_file), None
+
+        errors: list[str] = []
+
+        # 1. ThemerrDB
+        if tvdb_id or tmdb_id:
+            ok, path, err = self._try_themerrdb(
+                title, tvdb_id, tmdb_id, output_dir, dry_run
+            )
+            if ok:
+                return ok, path, err
+            logger.info(f"ThemerrDB miss for '{title}': {err}")
+            errors.append(f"ThemerrDB: {err}")
+
+        # 2. TelevisionTunes
+        ok, path, err = self._try_televisiontunes(title, output_dir, dry_run)
+        if ok:
+            return ok, path, err
+        logger.info(f"TelevisionTunes miss for '{title}': {err}")
+        errors.append(f"TelevisionTunes: {err}")
+
+        # 3. YouTube fallback
+        ok, path, err = self._try_youtube_theme(title, year, output_dir, dry_run)
+        if ok:
+            return ok, path, err
+        errors.append(f"YouTube: {err}")
+
+        return False, None, " | ".join(errors)
 
     # Delegate to NFOWriter
     def create_nfo_file(
