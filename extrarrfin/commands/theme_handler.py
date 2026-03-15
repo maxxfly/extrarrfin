@@ -87,7 +87,7 @@ def download_theme_mode(
         )
 
         ok, path, err = downloader.download_theme(
-            series.title, root_dir, dry_run=dry_run, force=force
+            series.title, root_dir, dry_run=dry_run, force=force, year=series.year
         )
 
         if ok:
@@ -143,7 +143,7 @@ def download_theme_mode(
             )
 
             ok, path, err = downloader.download_theme(
-                movie.title, root_dir, dry_run=dry_run, force=force
+                movie.title, root_dir, dry_run=dry_run, force=force, year=movie.year
             )
 
             if ok:

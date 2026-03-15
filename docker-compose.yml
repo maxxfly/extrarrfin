@@ -37,10 +37,15 @@ services:
       # STRM file mode: create .strm files instead of downloading videos
       # Set to 'true' to enable streaming mode (saves disk space)
       - USE_STRM_FILES=${USE_STRM_FILES:-false}
-    # Command to run schedule mode
+    # Command to run schedule mode (reads 'mode' from config.yaml)
     command: ["--config", "/config/config.yaml", "schedule-mode"]
-    # Alternatively, run download once:
+    # Run once for all modes configured in config.yaml:
     # command: ["--config", "/config/config.yaml", "download"]
+    # Run theme mode only (one-shot):
+    # command: ["--config", "/config/config.yaml", "theme"]
+    # Run theme mode on a schedule:
+    # command: ["--config", "/config/config.yaml", "schedule-mode"]
+    # (set  mode: ["season0", "tag", "theme"]  in config.yaml to include themes)
     networks:
       - media
 

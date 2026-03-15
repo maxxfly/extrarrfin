@@ -139,12 +139,14 @@ class Downloader:
         output_dir: Path,
         dry_run: bool = False,
         force: bool = False,
+        year: int | None = None,
     ) -> Tuple[bool, str | None, str | None]:
         """
         Search for and download the musical theme of a movie or series.
 
-        Searches YouTube for "Theme {title}" and downloads the first result
-        as theme.mp3 in output_dir. Skips if theme.mp3 already exists.
+        Searches YouTube for "main theme {title}", scores all candidates with
+        VideoScorer.score_theme_videos(), then downloads the best match
+        above min_score as theme.mp3.  Skips if theme.mp3 already exists.
 
         Returns:
             Tuple (success, file_path_or_None, error_message_or_None)
@@ -155,7 +157,7 @@ class Downloader:
             logger.info(f"Theme already exists, skipping: {theme_file}")
             return True, str(theme_file), None
 
-        query = f"Theme {title}"
+        query = f'main theme "{title}" {year}' if year else f'main theme "{title}"'
         if self.verbose:
             logger.info(f"[VERBOSE] YouTube search query: '{query}'")
         else:
@@ -178,12 +180,32 @@ class Downloader:
             if not result or "entries" not in result or not result["entries"]:
                 return False, None, f"No YouTube results found for: {query}"
 
-            video = next((e for e in result["entries"] if e and e.get("id")), None)
-            if not video:
+            entries = [e for e in result["entries"] if e and e.get("id")]
+            if not entries:
                 return False, None, "No valid video found"
 
+            # Score all candidates and pick the best one
+            video = self.scorer.score_theme_videos(entries, title, year=year)
+            if not video:
+                return (
+                    False,
+                    None,
+                    f"No theme with acceptable score found for: {title} "
+                    f"(min_score={self.scorer.min_score})",
+                )
+
             video_url = f"https://www.youtube.com/watch?v={video['id']}"
-            logger.info(f"Theme found: {video.get('title', video['id'])} - {video_url}")
+            score = video.get("_score", 0)
+            if self.verbose:
+                logger.info(
+                    f"[VERBOSE] Theme selected: {video.get('title')} "
+                    f"(score {score:.1f}) - {video_url}"
+                )
+            else:
+                logger.info(
+                    f"Theme found: {video.get('title', video['id'])} "
+                    f"(score {score:.1f}) - {video_url}"
+                )
 
             if dry_run:
                 logger.info(f"DRY RUN: Would save theme to {theme_file}")

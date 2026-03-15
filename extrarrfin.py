@@ -171,9 +171,9 @@ def list(ctx, limit, mode):
 @click.option(
     "--mode",
     "-m",
-    type=click.Choice(["season0", "tag"]),
+    type=click.Choice(["season0", "tag", "theme"]),
     multiple=True,
-    help="Download mode: season0 (monitored Season 0 episodes) or tag (behind-the-scenes videos for tagged series). Can be specified multiple times.",
+    help="Download mode: season0, tag (behind-the-scenes), or theme (theme.mp3). Can be specified multiple times.",
 )
 @click.option(
     "--jellyfin-url",
@@ -203,6 +203,7 @@ def download(
     config: Config = ctx.obj["config"]
     sonarr: SonarrClient = ctx.obj["sonarr"]
     downloader: Downloader = ctx.obj["downloader"]
+    radarr: RadarrClient | None = ctx.obj.get("radarr")
 
     # Enable verbose mode if requested
     downloader.verbose = verbose
@@ -249,7 +250,6 @@ def download(
                 console.print(
                     "\n[bold magenta]Mode: Tag (Behind-the-Scenes)[/bold magenta]"
                 )
-                radarr: RadarrClient | None = ctx.obj.get("radarr")
                 total, success, failed = download_tag_mode(
                     config,
                     sonarr,
@@ -259,6 +259,22 @@ def download(
                     dry_run=dry_run,
                     force=force,
                     no_scan=no_scan,
+                    verbose=verbose,
+                )
+                total_downloads += total
+                successful_downloads += success
+                failed_downloads += failed
+
+            elif current_mode == "theme":
+                console.print("\n[bold magenta]Mode: Theme[/bold magenta]")
+                total, success, failed = download_theme_mode(
+                    config,
+                    sonarr,
+                    downloader,
+                    radarr=radarr,
+                    limit=limit,
+                    dry_run=dry_run,
+                    force=force,
                     verbose=verbose,
                 )
                 total_downloads += total

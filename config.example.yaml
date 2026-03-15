@@ -66,9 +66,11 @@ log_level: "INFO"
 #      Films: Enregistre dans le dossier "extras" au sein du film
 #      Cherche sur YouTube: "nom de la série/film - behind the scenes", "making of", etc.
 # Exemples:
-#   mode: "season0"           # Mode season0 uniquement (séries seulement)
-#   mode: "tag"               # Mode tag uniquement (séries + films si Radarr configuré)
-#   mode: ["season0", "tag"]  # Les deux modes (exécute season0 ET tag)
+# mode: "season0"                    # Specials (Season 0) uniquement
+#   mode: "tag"                        # Behind-the-scenes pour les séries/films tagués
+#   mode: "theme"                      # Thèmes musicaux (theme.mp3) pour toutes les séries/films
+#   mode: ["season0", "tag"]           # Les deux premiers modes
+#   mode: ["season0", "tag", "theme"]  # Les trois modes
 mode: "season0"
 
 # Schedule mode configuration

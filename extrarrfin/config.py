@@ -27,7 +27,9 @@ class Config:
     schedule_enabled: bool = False
     schedule_interval: int = 1
     schedule_unit: str = "hours"
-    mode: str | list[str] = "season0"  # "season0", "tag", or ["season0", "tag"]
+    mode: str | list[str] = (
+        "season0"  # "season0", "tag", "theme", or a list e.g. ["season0", "tag", "theme"]
+    )
     # Subtitle options
     subtitle_languages: list = field(
         default_factory=lambda: ["fr", "en", "fr-FR", "en-US", "en-GB"]
