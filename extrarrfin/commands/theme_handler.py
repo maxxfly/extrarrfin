@@ -34,8 +34,12 @@ def download_theme_mode(
     """
     Download musical themes (theme.mp3) for all series and movies.
 
-    Searches YouTube for "Theme {title}" and saves the result as theme.mp3
-    directly in the root folder of each series/movie.
+    Sources are tried in order for each title:
+      1. ThemerrDB — direct lookup by TVDB/TMDB ID
+      2. TelevisionTunes — web search + MP3 download
+      3. YouTube — scored yt-dlp search (fallback)
+
+    Saves the result as theme.mp3 in the root folder of each series/movie.
     Skips entries where theme.mp3 already exists.
 
     Returns:

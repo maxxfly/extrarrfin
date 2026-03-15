@@ -8,10 +8,20 @@ The `theme` command automatically downloads the musical theme of each series and
 
 ## How it works
 
-1. For each series (from Sonarr) and movie (from Radarr, if configured):
-   - Check whether `theme.mp3` already exists → **skip if found**
-   - Search YouTube for `Theme <title>` (e.g. `Theme Breaking Bad`)
-   - Download the first result as `theme.mp3` (MP3, 192 kbps) via yt-dlp + FFmpeg
+For each series (from Sonarr) and movie (from Radarr, if configured), the following steps are performed:
+
+1. Check whether `theme.mp3` already exists → **skip if found**
+2. Try **three sources in order** (first success wins):
+
+| Priority | Source | Method |
+|----------|--------|--------|
+| 1 | **[ThemerrDB](https://app.lizardbyte.dev/ThemerrDB/)** | Direct JSON lookup by TVDB ID (series) or TMDB ID (movies). Returns a curated YouTube URL. |
+| 2 | **[TelevisionTunes](https://www.televisiontunes.com/)** | Search by title, pick the best match, download the MP3 directly or via yt-dlp. |
+| 3 | **YouTube** (fallback) | Scored search for `main theme "<title>"` via yt-dlp + the internal `VideoScorer`. |
+
+3. Download the audio and convert to **MP3 at 192 kbps** using yt-dlp + FFmpeg.
+
+> **Note:** ThemerrDB requires a valid TVDB ID (series) or TMDB ID (movie) to be set in Sonarr/Radarr. If the ID is missing, this source is skipped automatically.
 
 ---
 
@@ -100,7 +110,10 @@ Theme download summary:
 ## Notes
 
 - Radarr is **optional**. If not configured, only series themes are downloaded.
-- The search query is always `Theme <exact title>` — the first YouTube result is used.
+- Sources are tried in order — the first successful download wins. Errors from earlier sources are reported only if all sources fail.
+- **ThemerrDB** provides the most accurate results as themes are curated manually. It requires a TVDB ID (series) or TMDB ID (movie) to be present in Sonarr/Radarr.
+- **TelevisionTunes** SSL certificate may be expired; certificate verification is intentionally disabled for this source.
+- **YouTube** is the last-resort fallback. The search query is `main theme "<exact title>"` and results are scored by the internal `VideoScorer` (see [SCORING.md](../SCORING.md)).
 - Audio quality: MP3 at 192 kbps.
 - Re-running `theme` is safe: existing `theme.mp3` files are skipped automatically.  
   Use `--force` to overwrite them.
