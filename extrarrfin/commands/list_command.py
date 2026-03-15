@@ -362,7 +362,9 @@ def list_themes(
     # Only include series/movies that have actual downloaded content
     all_items: list[MediaItem] = []
     for s in series_list:
-        if any(season.statistics.get("episodeFileCount", 0) > 0 for season in s.seasons):
+        if any(
+            season.statistics.get("episodeFileCount", 0) > 0 for season in s.seasons
+        ):
             all_items.append({"type": "series", "data": s})
     for m in movies_list:
         if m.has_file:

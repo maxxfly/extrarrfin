@@ -18,9 +18,7 @@ console = Console()
 
 def _series_has_content(series) -> bool:
     """Return True if the series has at least one downloaded episode file."""
-    return any(
-        s.statistics.get("episodeFileCount", 0) > 0 for s in series.seasons
-    )
+    return any(s.statistics.get("episodeFileCount", 0) > 0 for s in series.seasons)
 
 
 def download_theme_mode(
