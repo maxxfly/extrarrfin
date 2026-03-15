@@ -249,11 +249,15 @@ class Downloader:
                 try:
                     subprocess.run(
                         [
-                            "ffmpeg", "-y",
-                            "-i", str(leftover),
+                            "ffmpeg",
+                            "-y",
+                            "-i",
+                            str(leftover),
                             "-vn",
-                            "-acodec", "libmp3lame",
-                            "-ab", "192k",
+                            "-acodec",
+                            "libmp3lame",
+                            "-ab",
+                            "192k",
                             str(theme_file),
                         ],
                         check=True,
@@ -261,7 +265,9 @@ class Downloader:
                     )
                     leftover.unlink(missing_ok=True)
                 except subprocess.CalledProcessError as conv_err:
-                    logger.error(f"ffmpeg fallback conversion failed: {conv_err.stderr.decode()}")
+                    logger.error(
+                        f"ffmpeg fallback conversion failed: {conv_err.stderr.decode()}"
+                    )
 
             if theme_file.exists():
                 return True, str(theme_file), None
