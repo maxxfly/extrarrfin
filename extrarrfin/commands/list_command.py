@@ -332,3 +332,129 @@ def list_command(
         else:
             total_size_str = f"{total_size} B"
         console.print(f"\n[bold cyan]Total size:[/bold cyan] {total_size_str}")
+
+
+def list_themes(
+    config: Config,
+    sonarr: SonarrClient,
+    downloader: Downloader,
+    radarr: RadarrClient | None = None,
+    limit: str | None = None,
+) -> None:
+    """Display a table showing which series and movies have a theme.mp3 file."""
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Fetching series...", total=None)
+        series_list = sonarr.get_all_series()
+        movies_list: list[Movie] = []
+        if radarr:
+            progress.update(task, description="Fetching movies...")
+            try:
+                movies_list = radarr.get_all_movies()
+            except Exception as e:
+                logger.warning(f"Error fetching movies from Radarr: {e}")
+        progress.update(task, completed=True)
+
+    # Only include series/movies that have actual downloaded content
+    all_items: list[MediaItem] = []
+    for s in series_list:
+        if any(season.statistics.get("episodeFileCount", 0) > 0 for season in s.seasons):
+            all_items.append({"type": "series", "data": s})
+    for m in movies_list:
+        if m.has_file:
+            all_items.append({"type": "movie", "data": m})
+
+    if limit:
+        if limit.isdigit():
+            all_items = [i for i in all_items if i["data"].id == int(limit)]
+        else:
+            all_items = [
+                i for i in all_items if limit.lower() in i["data"].title.lower()
+            ]
+
+    if not all_items:
+        console.print("[yellow]No series or movies found[/yellow]")
+        return
+
+    series_count = sum(1 for i in all_items if i["type"] == "series")
+    movies_count = sum(1 for i in all_items if i["type"] == "movie")
+    table_title = (
+        f"Theme Music — {len(all_items)} items "
+        f"({series_count} series, {movies_count} movies)"
+    )
+
+    table = Table(title=table_title)
+    table.add_column("Type", style="yellow", width=9)
+    table.add_column("ID", style="cyan")
+    table.add_column("Title", style="green")
+    table.add_column("Path", style="dim")
+    table.add_column("theme.mp3", style="bold", justify="center")
+    table.add_column("Size", style="cyan", justify="right")
+
+    with_theme = 0
+    without_theme = 0
+
+    for item in all_items:
+        media = item["data"]
+        type_emoji = "📺" if item["type"] == "series" else "🎬"
+        type_text = (
+            f"{type_emoji} TV" if item["type"] == "series" else f"{type_emoji} Movie"
+        )
+
+        try:
+            if item["type"] == "series":
+                root_dir = downloader.get_series_root_directory(
+                    cast(Series, media),
+                    config.media_directory,
+                    config.sonarr_directory,
+                )
+            else:
+                root_dir = downloader.get_movie_root_directory(
+                    cast(Movie, media),
+                    config.media_directory,
+                    config.radarr_directory,
+                )
+
+            theme_file = root_dir / "theme.mp3"
+            has_theme = theme_file.exists()
+
+            if has_theme:
+                with_theme += 1
+                size = theme_file.stat().st_size
+                if size >= 1024**2:
+                    size_str = f"{size / (1024**2):.2f} MB"
+                elif size >= 1024:
+                    size_str = f"{size / 1024:.2f} KB"
+                else:
+                    size_str = f"{size} B"
+                status = "[green]✓ Yes[/green]"
+            else:
+                without_theme += 1
+                size_str = "-"
+                status = "[red]✗ No[/red]"
+
+        except Exception as e:
+            logger.warning(f"Error checking theme for {media.title}: {e}")
+            status = "[yellow]?[/yellow]"
+            size_str = "-"
+            without_theme += 1
+
+        table.add_row(
+            type_text,
+            str(media.id),
+            media.title,
+            media.path,
+            status,
+            size_str,
+        )
+
+    console.print(table)
+    console.print(
+        f"\n[bold]Summary:[/bold] "
+        f"[green]{with_theme} with theme.mp3[/green]  "
+        f"[red]{without_theme} missing[/red]"
+    )

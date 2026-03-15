@@ -18,7 +18,9 @@ from extrarrfin.cli_config import (
 from extrarrfin.commands import (
     download_season0_mode,
     download_tag_mode,
+    download_theme_mode,
     list_command,
+    list_themes,
     test_command,
 )
 from extrarrfin.config import Config
@@ -108,9 +110,9 @@ def cli(
 @click.option(
     "--mode",
     "-m",
-    type=click.Choice(["season0", "tag"]),
+    type=click.Choice(["season0", "tag", "theme"]),
     multiple=True,
-    help="List mode: season0 (monitored Season 0 episodes) or tag (series/movies with want-extras tag). Can be specified multiple times.",
+    help="List mode: season0 (monitored Season 0 episodes), tag (series/movies with want-extras tag), or theme (theme.mp3 status). Can be specified multiple times.",
 )
 @click.pass_context
 def list(ctx, limit, mode):
@@ -134,7 +136,13 @@ def list(ctx, limit, mode):
         )
     )
 
-    list_command(config, sonarr, downloader, radarr, limit, modes)
+    if "theme" in modes:
+        list_themes(config, sonarr, downloader, radarr, limit)
+        non_theme_modes = [m for m in modes if m != "theme"]
+        if non_theme_modes:
+            list_command(config, sonarr, downloader, radarr, limit, non_theme_modes)
+    else:
+        list_command(config, sonarr, downloader, radarr, limit, modes)
 
 
 @cli.command()
@@ -315,6 +323,62 @@ def scan(ctx, series_id, dry_run):
             console.print("[green]✓ Scan triggered successfully[/green]")
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
+
+
+@cli.command()
+@click.option("--limit", "-l", help="Limit to specific series/movie (name or ID)")
+@click.option("--dry-run", "-d", is_flag=True, help="Simulation mode (don't download)")
+@click.option(
+    "--force",
+    "-f",
+    is_flag=True,
+    help="Force re-download even if theme.mp3 already exists",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Verbose mode",
+)
+@click.pass_context
+def theme(ctx, limit, dry_run, force, verbose):
+    """Download musical themes (theme.mp3) for all series and movies
+
+    Searches YouTube for 'Theme <title>' and saves the result as theme.mp3
+    directly in the root folder of each series/movie.
+    The download is skipped when theme.mp3 already exists.
+    """
+    config: Config = ctx.obj["config"]
+    sonarr: SonarrClient = ctx.obj["sonarr"]
+    downloader: Downloader = ctx.obj["downloader"]
+    radarr: RadarrClient | None = ctx.obj.get("radarr")
+
+    downloader.verbose = verbose
+
+    try:
+        total, successful, failed = download_theme_mode(
+            config,
+            sonarr,
+            downloader,
+            radarr=radarr,
+            limit=limit,
+            dry_run=dry_run,
+            force=force,
+            verbose=verbose,
+        )
+
+        console.print("\n[bold]Theme download summary:[/bold]")
+        console.print(f"  Total:   {total}")
+        console.print(f"  [green]Success: {successful}[/green]")
+        console.print(f"  [red]Failed:  {failed}[/red]")
+
+        if dry_run:
+            console.print("\n[yellow]DRY RUN mode - No downloads performed[/yellow]")
+
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        logger.exception("Error during theme download")
         sys.exit(1)
 
 

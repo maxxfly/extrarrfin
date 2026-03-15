@@ -94,9 +94,7 @@ class PathManager:
         If media_directory and radarr_directory are provided, do path mapping
         Otherwise use Radarr path directly
         """
-        real_path = PathManager._map_path(
-            movie.path, media_directory, radarr_directory
-        )
+        real_path = PathManager._map_path(movie.path, media_directory, radarr_directory)
 
         # Create extras directory inside movie directory
         extras_dir = real_path / "extras"
@@ -112,6 +110,24 @@ class PathManager:
     ) -> Path:
         """Alias for get_movie_directory - extras go in movie folder"""
         return PathManager.get_movie_directory(movie, media_directory, radarr_directory)
+
+    @staticmethod
+    def get_series_root_directory(
+        series: Series,
+        media_directory: str | None = None,
+        sonarr_directory: str | None = None,
+    ) -> Path:
+        """Return the root directory of the series (no subdirectory)"""
+        return PathManager._map_path(series.path, media_directory, sonarr_directory)
+
+    @staticmethod
+    def get_movie_root_directory(
+        movie: Movie,
+        media_directory: str | None = None,
+        radarr_directory: str | None = None,
+    ) -> Path:
+        """Return the root directory of the movie (no subdirectory)"""
+        return PathManager._map_path(movie.path, media_directory, radarr_directory)
 
     @staticmethod
     def _map_path(

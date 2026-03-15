@@ -111,6 +111,114 @@ class Downloader:
         """Build a filename for movie extras"""
         return PathManager.build_movie_extras_filename(movie, video_title)
 
+    def get_series_root_directory(
+        self,
+        series: Series,
+        media_directory: str | None = None,
+        sonarr_directory: str | None = None,
+    ) -> Path:
+        """Return the root directory of the series (no subdirectory)"""
+        return PathManager.get_series_root_directory(
+            series, media_directory, sonarr_directory
+        )
+
+    def get_movie_root_directory(
+        self,
+        movie: Movie,
+        media_directory: str | None = None,
+        radarr_directory: str | None = None,
+    ) -> Path:
+        """Return the root directory of the movie (no subdirectory)"""
+        return PathManager.get_movie_root_directory(
+            movie, media_directory, radarr_directory
+        )
+
+    def download_theme(
+        self,
+        title: str,
+        output_dir: Path,
+        dry_run: bool = False,
+        force: bool = False,
+    ) -> Tuple[bool, str | None, str | None]:
+        """
+        Search for and download the musical theme of a movie or series.
+
+        Searches YouTube for "Theme {title}" and downloads the first result
+        as theme.mp3 in output_dir. Skips if theme.mp3 already exists.
+
+        Returns:
+            Tuple (success, file_path_or_None, error_message_or_None)
+        """
+        theme_file = output_dir / "theme.mp3"
+
+        if theme_file.exists() and not force:
+            logger.info(f"Theme already exists, skipping: {theme_file}")
+            return True, str(theme_file), None
+
+        query = f"Theme {title}"
+        if self.verbose:
+            logger.info(f"[VERBOSE] YouTube search query: '{query}'")
+        else:
+            logger.info(f"Searching YouTube for theme: {query}")
+
+        ydl_search_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": True,
+            "default_search": f"ytsearch{self.youtube_search_results}",
+            "sleep_requests": 1,
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_search_opts) as ydl:
+                result = ydl.extract_info(
+                    f"ytsearch{self.youtube_search_results}:{query}", download=False
+                )
+
+            if not result or "entries" not in result or not result["entries"]:
+                return False, None, f"No YouTube results found for: {query}"
+
+            video = next((e for e in result["entries"] if e and e.get("id")), None)
+            if not video:
+                return False, None, "No valid video found"
+
+            video_url = f"https://www.youtube.com/watch?v={video['id']}"
+            logger.info(f"Theme found: {video.get('title', video['id'])} - {video_url}")
+
+            if dry_run:
+                logger.info(f"DRY RUN: Would save theme to {theme_file}")
+                return True, str(theme_file), None
+
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            ydl_download_opts = {
+                "format": "bestaudio/best",
+                "outtmpl": str(output_dir / "theme.%(ext)s"),
+                "quiet": not self.verbose,
+                "no_warnings": not self.verbose,
+                "sleep_requests": 1,
+                "postprocessors": [
+                    {
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "192",
+                    }
+                ],
+            }
+
+            with yt_dlp.YoutubeDL(ydl_download_opts) as ydl:
+                ydl.download([video_url])
+
+            if theme_file.exists():
+                return True, str(theme_file), None
+            else:
+                return False, None, "Download completed but theme.mp3 not found"
+
+        except Exception as e:
+            error_msg = f"Error downloading theme: {e}"
+            logger.error(error_msg)
+            return False, None, error_msg
+
     # Delegate to NFOWriter
     def create_nfo_file(
         self,
