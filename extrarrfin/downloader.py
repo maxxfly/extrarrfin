@@ -142,10 +142,12 @@ class Downloader:
         output_dir: Path,
         nocheckcertificate: bool = False,
     ) -> Tuple[bool, str | None, str | None]:
-        """Download audio from *url* via yt-dlp and convert to theme.mp3."""
+        """Download audio from *url* via yt-dlp then convert to theme.mp3 with ffmpeg."""
         theme_file = output_dir / "theme.mp3"
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Download raw audio without any postprocessor to avoid yt-dlp/ffmpeg
+        # permission issues during postprocessing.
         ydl_opts = {
             "format": "bestaudio/best",
             "outtmpl": str(output_dir / "theme.%(ext)s"),
@@ -153,58 +155,45 @@ class Downloader:
             "no_warnings": not self.verbose,
             "sleep_requests": 1,
             "nocheckcertificate": nocheckcertificate,
-            "postprocessors": [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }
-            ],
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            try:
+                ydl.download([url])
+            except Exception as ydl_err:
+                logger.debug(f"yt-dlp download error: {ydl_err}")
 
         if theme_file.exists():
             return True, str(theme_file), None
 
-        # Fallback: yt-dlp postprocessor may have left the file in its
-        # original container (e.g. theme.webm). Convert with ffmpeg.
+        # Convert the downloaded file (e.g. .webm / .m4a / .opus) to mp3.
         leftover = next(
             (f for f in output_dir.glob("theme.*") if f.suffix != ".mp3"),
             None,
         )
-        if leftover:
-            logger.info(
-                f"FFmpegExtractAudio did not produce theme.mp3; "
-                f"converting {leftover.name} with ffmpeg"
+        if not leftover:
+            return False, None, "Download completed but no audio file found to convert"
+
+        logger.info(f"Converting {leftover.name} → theme.mp3")
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-i", str(leftover),
+                    "-vn", "-acodec", "libmp3lame", "-ab", "192k",
+                    str(theme_file),
+                ],
+                check=True,
+                capture_output=True,
             )
-            try:
-                subprocess.run(
-                    [
-                        "ffmpeg",
-                        "-y",
-                        "-i",
-                        str(leftover),
-                        "-vn",
-                        "-acodec",
-                        "libmp3lame",
-                        "-ab",
-                        "192k",
-                        str(theme_file),
-                    ],
-                    check=True,
-                    capture_output=True,
-                )
-                leftover.unlink(missing_ok=True)
-            except subprocess.CalledProcessError as conv_err:
-                logger.error(
-                    f"ffmpeg fallback conversion failed: {conv_err.stderr.decode()}"
-                )
+            leftover.unlink(missing_ok=True)
+        except subprocess.CalledProcessError as conv_err:
+            logger.error(f"ffmpeg conversion failed: {conv_err.stderr.decode()}")
+            return False, None, f"ffmpeg conversion failed: {conv_err.stderr.decode()}"
 
         if theme_file.exists():
             return True, str(theme_file), None
-        return False, None, "Download completed but theme.mp3 not found"
+        return False, None, "Conversion completed but theme.mp3 not found"
 
     def _try_themerrdb(
         self,
@@ -329,17 +318,7 @@ class Downloader:
                 logger.info(f"DRY RUN: Would download from TelevisionTunes: {show_url}")
                 return True, str(theme_file), None
 
-            # Try yt-dlp generic extractor first
-            try:
-                ok, path, err = self._download_audio_from_url(
-                    show_url, output_dir, nocheckcertificate=True
-                )
-                if ok:
-                    return ok, path, err
-            except Exception:
-                pass
-
-            # Fallback: scrape the show page for a direct MP3 URL
+            # Scrape the show page for a direct MP3 URL
             page_resp = requests.get(
                 show_url, timeout=10, headers=_HEADERS, verify=False
             )
