@@ -4,6 +4,7 @@ Download module via yt-dlp with Jellyfin formatting
 
 import logging
 import re
+import subprocess
 from pathlib import Path
 from typing import Tuple
 
@@ -230,6 +231,37 @@ class Downloader:
 
             with yt_dlp.YoutubeDL(ydl_download_opts) as ydl:
                 ydl.download([video_url])
+
+            if theme_file.exists():
+                return True, str(theme_file), None
+
+            # Fallback: yt-dlp postprocessor may have left the file in its
+            # original container (e.g. theme.webm). Convert with ffmpeg.
+            leftover = next(
+                (f for f in output_dir.glob("theme.*") if f.suffix != ".mp3"),
+                None,
+            )
+            if leftover:
+                logger.info(
+                    f"FFmpegExtractAudio did not produce theme.mp3; "
+                    f"converting {leftover.name} with ffmpeg"
+                )
+                try:
+                    subprocess.run(
+                        [
+                            "ffmpeg", "-y",
+                            "-i", str(leftover),
+                            "-vn",
+                            "-acodec", "libmp3lame",
+                            "-ab", "192k",
+                            str(theme_file),
+                        ],
+                        check=True,
+                        capture_output=True,
+                    )
+                    leftover.unlink(missing_ok=True)
+                except subprocess.CalledProcessError as conv_err:
+                    logger.error(f"ffmpeg fallback conversion failed: {conv_err.stderr.decode()}")
 
             if theme_file.exists():
                 return True, str(theme_file), None
