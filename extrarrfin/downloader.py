@@ -142,15 +142,28 @@ class Downloader:
         output_dir: Path,
         nocheckcertificate: bool = False,
     ) -> Tuple[bool, str | None, str | None]:
-        """Download audio from *url* via yt-dlp then convert to theme.mp3 with ffmpeg."""
+        """Download audio from *url* via yt-dlp and convert to theme.mp3.
+
+        yt-dlp's FFmpegExtractAudio postprocessor is used so that the
+        conversion to mp3 happens atomically: the intermediate webm/m4a/mp4
+        is never kept on disk.  A manual ffmpeg pass is attempted as a
+        fallback if the postprocessor did not produce theme.mp3.
+        """
         theme_file = output_dir / "theme.mp3"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Download raw audio without any postprocessor to avoid yt-dlp/ffmpeg
-        # permission issues during postprocessing.
+        # Use yt-dlp's built-in postprocessor so the download + conversion
+        # happen atomically and no intermediate file (webm/mp4/…) is left.
         ydl_opts = {
             "format": "bestaudio/best",
             "outtmpl": str(output_dir / "theme.%(ext)s"),
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }
+            ],
             "quiet": not self.verbose,
             "no_warnings": not self.verbose,
             "sleep_requests": 1,
@@ -163,10 +176,16 @@ class Downloader:
             except Exception as ydl_err:
                 logger.debug(f"yt-dlp download error: {ydl_err}")
 
+        # Safeguard: remove any non-mp3 theme file the postprocessor may have
+        # left behind (e.g. yt-dlp wrote theme.webm and ffmpeg postprocessor
+        # failed silently).
+        self._purge_non_mp3_theme_files(output_dir)
+
         if theme_file.exists():
             return True, str(theme_file), None
 
-        # Convert the downloaded file (e.g. .webm / .m4a / .opus) to mp3.
+        # Fallback: postprocessor may have failed but raw file is present.
+        # Convert manually with ffmpeg and clean up the source file.
         leftover = next(
             (f for f in output_dir.glob("theme.*") if f.suffix != ".mp3"),
             None,
@@ -174,7 +193,7 @@ class Downloader:
         if not leftover:
             return False, None, "Download completed but no audio file found to convert"
 
-        logger.info(f"Converting {leftover.name} → theme.mp3")
+        logger.info(f"Converting {leftover.name} → theme.mp3 (fallback)")
         try:
             subprocess.run(
                 [
@@ -192,10 +211,20 @@ class Downloader:
                 check=True,
                 capture_output=True,
             )
-            leftover.unlink(missing_ok=True)
+        except FileNotFoundError:
+            logger.error("ffmpeg not found in PATH - cannot convert audio to mp3")
+            return False, None, "ffmpeg not found in PATH - cannot convert audio to mp3"
         except subprocess.CalledProcessError as conv_err:
             logger.error(f"ffmpeg conversion failed: {conv_err.stderr.decode()}")
             return False, None, f"ffmpeg conversion failed: {conv_err.stderr.decode()}"
+        finally:
+            # Always remove the raw file, whether ffmpeg succeeded or not.
+            try:
+                leftover.unlink(missing_ok=True)
+            except OSError as e:
+                logger.warning(
+                    f"Could not remove intermediate file {leftover.name}: {e}"
+                )
 
         if theme_file.exists():
             return True, str(theme_file), None
@@ -304,18 +333,35 @@ class Downloader:
             if not show_links:
                 return False, None, "TelevisionTunes: no results found"
 
-            # Pick best match by title-word overlap with the URL slug
+            # Pick best match by significant-word overlap with the URL slug.
+            # Only the base part of the slug (before the first " - " separator)
+            # is used, so album track URLs like
+            # "Batman - Soundtrack - 06 Pows The Penguin.html" don't match
+            # "The Penguin" just because they contain the word "penguin".
             title_words = set(title.lower().split())
+            _tt_stopwords = {"the", "a", "an", "of", "in", "and"}
+            sig_title_words = title_words - _tt_stopwords
 
             def _link_score(link: str) -> int:
-                slug = re.sub(
-                    r"[^a-z0-9]",
-                    " ",
-                    link.replace(".html", "").split("/")[-1].replace("_", " ").lower(),
+                raw_slug = (
+                    link.replace(".html", "").split("/")[-1].replace("_", " ").lower()
                 )
-                return len(title_words & set(slug.split()))
+                # Take only the show-name part, before any " - " separator
+                base_part = raw_slug.split(" - ")[0]
+                base_clean = re.sub(r"[^a-z0-9]", " ", base_part)
+                match_words = sig_title_words if sig_title_words else title_words
+                return len(match_words & set(base_clean.split()))
 
             best_link = max(show_links[:10], key=_link_score)
+
+            # Reject if no significant word from the title is in the show slug
+            if sig_title_words and _link_score(best_link) == 0:
+                return (
+                    False,
+                    None,
+                    f"TelevisionTunes: no reliable match found for '{title}'",
+                )
+
             show_url = f"https://www.televisiontunes.com{best_link}"
             logger.info(f"TelevisionTunes: best match for '{title}' → {show_url}")
 
@@ -467,6 +513,19 @@ class Downloader:
         """
         theme_file = output_dir / "theme.mp3"
 
+        # Always clean up stale non-mp3 theme files (e.g. .webm / .mp4),
+        # even when theme.mp3 already exists — they may be leftover artefacts.
+        if output_dir.exists():
+            for stale in list(output_dir.glob("theme.*")):
+                if stale.suffix != ".mp3":
+                    try:
+                        stale.unlink()
+                        logger.debug(f"Removed stale theme file: {stale.name}")
+                    except OSError as e:
+                        logger.warning(
+                            f"Could not remove stale theme file {stale.name}: {e}"
+                        )
+
         if theme_file.exists() and not force:
             logger.info(f"Theme already exists, skipping: {theme_file}")
             return True, str(theme_file), None
@@ -478,6 +537,7 @@ class Downloader:
             ok, path, err = self._try_themerrdb(
                 title, tvdb_id, tmdb_id, output_dir, dry_run
             )
+            self._purge_non_mp3_theme_files(output_dir)
             if ok:
                 return ok, path, err
             logger.info(f"ThemerrDB miss for '{title}': {err}")
@@ -485,6 +545,7 @@ class Downloader:
 
         # 2. TelevisionTunes
         ok, path, err = self._try_televisiontunes(title, output_dir, dry_run)
+        self._purge_non_mp3_theme_files(output_dir)
         if ok:
             return ok, path, err
         logger.info(f"TelevisionTunes miss for '{title}': {err}")
@@ -492,11 +553,27 @@ class Downloader:
 
         # 3. YouTube fallback
         ok, path, err = self._try_youtube_theme(title, year, output_dir, dry_run)
+        self._purge_non_mp3_theme_files(output_dir)
         if ok:
             return ok, path, err
         errors.append(f"YouTube: {err}")
 
         return False, None, " | ".join(errors)
+
+    @staticmethod
+    def _purge_non_mp3_theme_files(output_dir: Path) -> None:
+        """Delete any theme.* file that is not theme.mp3 (safeguard)."""
+        if not output_dir.exists():
+            return
+        for leftover in list(output_dir.glob("theme.*")):
+            if leftover.suffix != ".mp3":
+                try:
+                    leftover.unlink()
+                    logger.warning(
+                        f"Safeguard: removed non-mp3 theme file: {leftover.name}"
+                    )
+                except OSError as e:
+                    logger.warning(f"Safeguard: could not remove {leftover.name}: {e}")
 
     # Delegate to NFOWriter
     def create_nfo_file(

@@ -993,6 +993,21 @@ class VideoScorer:
             if year and str(year) in vtitle:
                 score += 25
 
+            # --- Penalize a year in the video title that significantly predates
+            #     the series (e.g. "BJ and the Bear - 1979 Opening Theme" for a
+            #     2022 series called "The Bear") ---
+            if year:
+                ytitle_year_m = re.search(r"\b((?:18|19|20)\d{2})\b", vtitle)
+                if ytitle_year_m:
+                    ytitle_year = int(ytitle_year_m.group(1))
+                    if year - ytitle_year >= 10:
+                        score -= 50
+                        if self.verbose:
+                            logger.info(
+                                f"[VERBOSE] Theme: old year in title penalty "
+                                f"({ytitle_year} vs series {year}) — '{vtitle}'"
+                            )
+
             # --- Year proximity (upload date) ---
             if upload_date and year:
                 try:

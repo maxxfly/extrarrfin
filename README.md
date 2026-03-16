@@ -17,7 +17,7 @@
 - 🔄 **Sonarr/Radarr integration** — triggers a scan after download
 - 🎬 **Radarr support** — download extras for movies (tag mode)
 - 🏷️ **Tag mode** — download behind-the-scenes via `want-extras` tag ([see TAG_MODE.md](TAG_MODE.md))
-- 🎵 **Theme music** — downloads `theme.mp3` for every series and movie (ThemerrDB → TelevisionTunes → YouTube)
+- 🎵 **Theme music** — downloads `theme.mp3` for every series and movie (ThemerrDB → TelevisionTunes → YouTube) ⚠️ *work in progress — some titles may get incorrect matches (see below)*
 - 📝 **Subtitles** — automatic download and SRT conversion
 - 📺 **STRM mode** — streaming files instead of downloads (saves disk space)
 - ⏰ **Schedule mode** — periodic automatic downloads
@@ -58,13 +58,26 @@ python extrarrfin.py download
 | [docs/usage.md](docs/usage.md) | All CLI commands with examples and common use cases |
 | [docs/season0.md](docs/season0.md) | Season 0 mode — what gets downloaded and how |
 | [TAG_MODE.md](TAG_MODE.md) | Tag mode — behind-the-scenes extras |
-| [docs/theme-mode.md](docs/theme-mode.md) | Theme music mode — `theme.mp3` download |
+| [docs/theme-mode.md](docs/theme-mode.md) | Theme music mode — `theme.mp3` download ⚠️ WIP |
 | [docs/subtitles.md](docs/subtitles.md) | Subtitle management |
 | [docs/strm-mode.md](docs/strm-mode.md) | STRM file mode (streaming, no disk usage) |
 | [docs/jellyfin.md](docs/jellyfin.md) | Jellyfin integration |
 | [docs/docker.md](docs/docker.md) | Docker & Docker Compose |
 | [docs/advanced.md](docs/advanced.md) | Directory mapping, systemd, cron, troubleshooting |
 | [SCORING.md](SCORING.md) | Video scoring system — configuration and tuning |
+
+---
+
+## ⚠️ Theme mode — known limitations
+
+The theme music mode (`theme-mode`) is still being fine-tuned. Known issues:
+
+- **Wrong match on YouTube** — for short or generic titles (e.g. *The Bear*, *The Penguin*), the scorer may pick a video from an unrelated older show that shares a keyword.
+- **Orchestral/cover version** — the YouTube fallback may prefer a cover or orchestral arrangement over the original theme.
+- **TelevisionTunes false positive** — for titles with common words the slug-matching may land on a loosely related page.
+- **Permission errors** — if the destination folder is owned by root (e.g. previous Docker run), the download will fail with `Permission denied`. Fix ownership before running.
+
+Use `--force` to retry a title and `--verbose` to see the scoring details. Contributions and score tuning are welcome.
 
 ---
 
