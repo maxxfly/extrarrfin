@@ -426,10 +426,16 @@ class Downloader:
         year: int | None,
         output_dir: Path,
         dry_run: bool,
+        network: str | None = None,
     ) -> Tuple[bool, str | None, str | None]:
         """Search YouTube for the main theme and download the best-scored match."""
         theme_file = output_dir / "theme.mp3"
-        query = f'main theme "{title}" {year}' if year else f'main theme "{title}"'
+
+        # Put year IMMEDIATELY after title for disambiguation (e.g. "Good Boy 2025")
+        # This helps YouTube distinguish between films/shows with generic names
+        # and K-dramas or other content with the same title.
+        title_year = f"{title} {year}" if year else title
+        query = f"{title_year} original score soundtrack"
 
         if self.verbose:
             logger.info(f"[VERBOSE] YouTube theme search query: '{query}'")
@@ -445,19 +451,86 @@ class Downloader:
         }
 
         try:
+            # ---- Primary search: original score / soundtrack query ----
+            all_entries: list[dict] = []
+            seen_ids: set[str] = set()
+
             with yt_dlp.YoutubeDL(ydl_search_opts) as ydl:
                 result = ydl.extract_info(
                     f"ytsearch{self.youtube_search_results}:{query}", download=False
                 )
 
-            if not result or "entries" not in result or not result["entries"]:
+            if result and "entries" in result:
+                for e in result["entries"]:
+                    if e and e.get("id") and e["id"] not in seen_ids:
+                        all_entries.append(e)
+                        seen_ids.add(e["id"])
+
+            # ---- Secondary search: main theme query ----
+            query2 = f"{title} main theme original score"
+            if self.verbose:
+                logger.info(f"[VERBOSE] YouTube theme secondary search: '{query2}'")
+            try:
+                with yt_dlp.YoutubeDL(ydl_search_opts) as ydl2:
+                    result2 = ydl2.extract_info(
+                        f"ytsearch{self.youtube_search_results}:{query2}",
+                        download=False,
+                    )
+                if result2 and "entries" in result2:
+                    for e in result2["entries"]:
+                        if e and e.get("id") and e["id"] not in seen_ids:
+                            all_entries.append(e)
+                            seen_ids.add(e["id"])
+            except Exception as e2:
+                logger.debug(f"Secondary theme search failed: {e2}")
+
+            # ---- Tertiary search: opening credits/title sequence ----
+            # Official channels often publish opening credits videos
+            # e.g. "IT: Welcome to Derry | Opening Credits | HBO Max"
+            query3 = f"{title_year} opening credits theme"
+            if self.verbose:
+                logger.info(f"[VERBOSE] YouTube theme tertiary search: '{query3}'")
+            try:
+                with yt_dlp.YoutubeDL(ydl_search_opts) as ydl3:
+                    result3 = ydl3.extract_info(
+                        f"ytsearch{self.youtube_search_results}:{query3}",
+                        download=False,
+                    )
+                if result3 and "entries" in result3:
+                    for e in result3["entries"]:
+                        if e and e.get("id") and e["id"] not in seen_ids:
+                            all_entries.append(e)
+                            seen_ids.add(e["id"])
+            except Exception as e3:
+                logger.debug(f"Tertiary theme search failed: {e3}")
+
+            # ---- Quaternary search: network-targeted if available ----
+            if network:
+                query4 = f"{title_year} {network} theme score"
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] YouTube theme quaternary search: '{query4}'"
+                    )
+                try:
+                    with yt_dlp.YoutubeDL(ydl_search_opts) as ydl4:
+                        result4 = ydl4.extract_info(
+                            f"ytsearch{self.youtube_search_results}:{query4}",
+                            download=False,
+                        )
+                    if result4 and "entries" in result4:
+                        for e in result4["entries"]:
+                            if e and e.get("id") and e["id"] not in seen_ids:
+                                all_entries.append(e)
+                                seen_ids.add(e["id"])
+                except Exception as e4:
+                    logger.debug(f"Quaternary theme search failed: {e4}")
+
+            if not all_entries:
                 return False, None, f"No YouTube results found for: {query}"
 
-            entries = [e for e in result["entries"] if e and e.get("id")]
-            if not entries:
-                return False, None, "No valid YouTube video found"
-
-            video = self.scorer.score_theme_videos(entries, title, year=year)
+            video = self.scorer.score_theme_videos(
+                all_entries, title, year=year, network=network
+            )
             if not video:
                 return (
                     False,
@@ -499,6 +572,7 @@ class Downloader:
         year: int | None = None,
         tvdb_id: int | None = None,
         tmdb_id: int | None = None,
+        network: str | None = None,
     ) -> Tuple[bool, str | None, str | None]:
         """
         Search for and download the musical theme of a movie or series.
@@ -552,7 +626,9 @@ class Downloader:
         errors.append(f"TelevisionTunes: {err}")
 
         # 3. YouTube fallback
-        ok, path, err = self._try_youtube_theme(title, year, output_dir, dry_run)
+        ok, path, err = self._try_youtube_theme(
+            title, year, output_dir, dry_run, network=network
+        )
         self._purge_non_mp3_theme_files(output_dir)
         if ok:
             return ok, path, err

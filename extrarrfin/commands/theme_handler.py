@@ -97,6 +97,7 @@ def download_theme_mode(
             force=force,
             year=series.year,
             tvdb_id=series.tvdb_id,
+            network=series.network,
         )
 
         if ok:
@@ -158,6 +159,7 @@ def download_theme_mode(
                 force=force,
                 year=movie.year,
                 tmdb_id=movie.tmdb_id,
+                network=movie.studio,
             )
 
             if ok:

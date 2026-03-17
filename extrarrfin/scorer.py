@@ -41,7 +41,10 @@ class ScoringWeights:
     # Thresholds
     min_duration: int = 60  # seconds
     max_duration: int = 5400  # 90 minutes
-    min_view_count_for_like_ratio: int = 100
+    min_view_count_for_like_ratio: int = (
+        1000  # Increased from 100 to avoid inflated ratios on tiny videos
+    )
+    min_view_count_for_scoring: int = 50  # Penalty for very low view counts
 
 
 class VideoScorer:
@@ -67,6 +70,9 @@ class VideoScorer:
         self.weights = weights or ScoringWeights()
         self.min_score = min_score
         self.verbose = verbose
+        # MUCH lower threshold for theme scoring - themes are hard to match
+        # Official themes often have lower engagement than regular content
+        self.theme_min_score = min(min_score - 15, 35.0)
 
     def score_and_select_video(
         self, videos: list, series: Series, episode_title: str
@@ -235,6 +241,15 @@ class VideoScorer:
         """Score based on view count and like ratio"""
         score = 0.0
 
+        # Penalty for very low view counts (indicates obscure or fake content)
+        if view_count and view_count < self.weights.min_view_count_for_scoring:
+            penalty = 20.0 * (1 - view_count / self.weights.min_view_count_for_scoring)
+            score -= penalty
+            if self.verbose:
+                logger.info(
+                    f"[VERBOSE] Low view count penalty: -{penalty:.1f} ({view_count:,} views)"
+                )
+
         # View count bonus (logarithmic)
         if view_count and view_count > 0:
             view_score = min(
@@ -246,7 +261,7 @@ class VideoScorer:
                     f"[VERBOSE] View count bonus: +{view_score:.1f} ({view_count:,} views)"
                 )
 
-        # Like ratio bonus
+        # Like ratio bonus (only on videos with enough views to be meaningful)
         if (
             like_count
             and view_count
@@ -825,37 +840,28 @@ class VideoScorer:
         videos: list,
         media_title: str,
         year: int | None = None,
+        network: str | None = None,
     ) -> dict | None:
         """
-        Score YouTube search results to find the best musical theme for a
-        movie or series title.
+        Score YouTube search results to find the best musical theme.
 
-        Scoring (search query is already "main theme <title>"):
-          +50  video title contains ALL significant words of media_title
-          +20  video title contains at least half the words of media_title
-          +40  title contains a strong theme keyword
-               ("main theme", "opening theme", "theme song", "main title",
-                "ost", "original soundtrack", "original score")
-          +20  title contains a softer keyword ("theme", "soundtrack", "score")
-          +15  title contains "official"
-          +20  year proximity bonus (max, within 5 years)
-          +10  view count bonus (log scale)
-           +8  like ratio bonus
-          -25  cover / tribute / piano / guitar / violin / remix
-          -30  reaction / review / top10 / playlist / compilation /
-               explained / theory / gameplay
-          -30  trailer / teaser
-          -30  duration > 10 min (album/compilation)
-          -20  duration < 20 s (too short)
-          -50  none of media_title words found in video title
+        Logic inspired by score_behind_scenes_videos which works well:
+        - Hard rejection of low-quality/obscure videos (< 200 views)
+        - Hard rejection of promotional announcements
+        - Positive scoring for theme keywords, title match, network match
+        - Penalties for covers, noise, trailers, OST tracks
 
-        Returns the best video dict (with '_score') above self.min_score,
-        or None if no acceptable match.
+        Returns the best video dict (with '_score') above theme_min_score, or None.
         """
         if not videos:
             return None
 
-        # Split media title into significant words (≥3 chars, ignore articles)
+        # --- Minimum view count: themes must have some real reach ---
+        # A video with < 200 views is almost certainly NOT an official theme
+        # even if the title perfectly matches (e.g. test uploads, re-uploads)
+        # The good video has 100k views, the bad one has 21 views.
+        MIN_THEME_VIEWS = 200
+
         _stopwords = {
             "the",
             "a",
@@ -880,11 +886,24 @@ class VideoScorer:
             "opening theme",
             "theme song",
             "main title",
+            "opening title",  # e.g. "Opening Title Sequence"
+            "title sequence",  # e.g. "Season 1 Opening Title Sequence"
+            "opening credits",  # e.g. "Opening Credits | HBO Max"
+            "opening credit",
+            "title theme",
+            "intro theme",
             "ost",
             "original soundtrack",
             "original score",
         ]
-        soft_theme_kw = ["theme", "soundtrack", "score"]
+        soft_theme_kw = [
+            "theme",
+            "soundtrack",
+            "score",
+            "title sequence",
+            "opening",
+            "credits",
+        ]
         cover_keywords = [
             "cover",
             "tribute",
@@ -899,8 +918,19 @@ class VideoScorer:
             "remix",
             "8-bit",
             "8bit",
+            "lyrics",
+            "lyric video",
         ]
-        noise_keywords = [
+        # Promotional/noise content — definitely NOT theme music
+        reject_keywords = [
+            "now on",
+            "now available",
+            "coming to",
+            "available on",
+            "premiering on",
+            "streaming on",
+            "maintenant disponible",
+            "disponible sur",
             "reaction",
             "review",
             "top 10",
@@ -923,92 +953,102 @@ class VideoScorer:
             vtitle = video.get("title", "")
             vtitle_lower = vtitle.lower()
             duration = video.get("duration")
-            view_count = video.get("view_count")
+            view_count = video.get("view_count") or 0
             like_count = video.get("like_count")
             upload_date = video.get("upload_date")
+            channel = video.get("channel") or ""
+            channel_lower = channel.lower()
             score: float = 0.0
 
-            # --- Title word matching ---
-            matched = 0
+            # ── HARD REJECTIONS (no score computed) ──────────────────────────
+
+            # 1. Minimum view count: obscure uploads can't be official themes
+            if view_count < MIN_THEME_VIEWS:
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] Theme: REJECT low views ({view_count} < {MIN_THEME_VIEWS}) — '{vtitle}'"
+                    )
+                continue
+
+            # 2. Promotional announcements or noise content
+            if any(kw in vtitle_lower for kw in reject_keywords):
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] Theme: REJECT promotional/noise content — '{vtitle}'"
+                    )
+                continue
+
+            # 3. K-drama/K-pop fan video formats:
+            #    "[MV]", "[FMV]", "[AMV]", "[PMV]", "[Official MV]" etc.
+            _fan_video_prefix = re.match(r"^\[([a-z]{1,8})\]", vtitle_lower)
+            if _fan_video_prefix:
+                _prefix_tag = _fan_video_prefix.group(1)
+                # Block known fan/music video tags that are NOT main themes
+                _fan_tags = {"mv", "fmv", "amv", "pmv", "m/v", "audio", "live", "lyric"}
+                if any(tag in _prefix_tag for tag in _fan_tags):
+                    if self.verbose:
+                        logger.info(
+                            f"[VERBOSE] Theme: REJECT fan/music video format [{_prefix_tag.upper()}] — '{vtitle}'"
+                        )
+                    continue
+
+            # 4. "OST Part.X" or "OST | Track Name" = specific track from an OST album
+            if re.search(r"\bost\s+part\b", vtitle_lower) or re.search(
+                r"\bost\s*\|", vtitle_lower
+            ):
+                if self.verbose:
+                    logger.info(f"[VERBOSE] Theme: REJECT OST album track — '{vtitle}'")
+                continue
+
+            # 5. Must contain at least one music/theme keyword
+            # Interviews, making-of, news segments etc. about the show are NOT themes
+            all_theme_kw = (
+                strong_theme_kw + soft_theme_kw + ["music", "song", "audio", "sound"]
+            )
+            if not any(kw in vtitle_lower for kw in all_theme_kw):
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] Theme: REJECT no music keyword found — '{vtitle}'"
+                    )
+                continue
+
+            # ── POSITIVE SCORING ─────────────────────────────────────────────
+
+            # Title word matching against media title
             if title_words:
                 matched = sum(1 for w in title_words if w in vtitle_lower)
                 ratio = matched / len(title_words)
                 if ratio == 1.0:
-                    score += 50  # all significant words present
+                    score += 50  # All significant words present
                 elif ratio >= 0.5:
-                    score += 20  # at least half
+                    score += 20  # At least half the words
                 else:
-                    score -= 50  # very few words match → likely wrong content
-
-                # --- Reverse coverage: for short titles, penalize when media words
-                #     represent only a tiny fraction of the video's non-theme content ---
-                if len(title_words) <= 2:
-                    _theme_words = {
-                        "main",
-                        "theme",
-                        "song",
-                        "songs",
-                        "ost",
-                        "official",
-                        "original",
-                        "soundtrack",
-                        "score",
-                        "music",
-                        "audio",
-                    }
-                    video_content_words = [
-                        w.lower()
-                        for w in re.split(r"\W+", vtitle)
-                        if len(w) >= 3
-                        and w.lower() not in _stopwords
-                        and w.lower() not in _theme_words
-                    ]
-                    if len(video_content_words) >= 3:
-                        reverse_ratio = matched / len(video_content_words)
-                        if reverse_ratio < 0.25:
-                            score -= 30
-                            if self.verbose:
-                                logger.info(
-                                    f"[VERBOSE] Theme: low title coverage penalty "
-                                    f"({matched}/{len(video_content_words)}) — '{vtitle}'"
-                                )
+                    score -= 50  # Very few matches → probably wrong content
             else:
-                # Fallback: exact substring match
                 if media_title.lower() in vtitle_lower:
                     score += 50
                 else:
                     score -= 50
 
-            # --- Theme keyword ---
+            # Strong theme keyword (main theme, opening theme, ost…)
             if any(kw in vtitle_lower for kw in strong_theme_kw):
-                score += 40
+                score += 50
+                if self.verbose:
+                    logger.info("[VERBOSE] Theme: strong theme keyword +50")
             elif any(kw in vtitle_lower for kw in soft_theme_kw):
-                score += 20
+                score += 25
+                if self.verbose:
+                    logger.info("[VERBOSE] Theme: soft theme keyword +25")
 
-            # --- Official indicator ---
+            # "Official" in title
             if "official" in vtitle_lower:
                 score += 15
 
-            # --- Year literal in video title ---
+            # Year match in title
             if year and str(year) in vtitle:
                 score += 25
 
-            # --- Penalize a year in the video title that significantly predates
-            #     the series (e.g. "BJ and the Bear - 1979 Opening Theme" for a
-            #     2022 series called "The Bear") ---
-            if year:
-                ytitle_year_m = re.search(r"\b((?:18|19|20)\d{2})\b", vtitle)
-                if ytitle_year_m:
-                    ytitle_year = int(ytitle_year_m.group(1))
-                    if year - ytitle_year >= 10:
-                        score -= 50
-                        if self.verbose:
-                            logger.info(
-                                f"[VERBOSE] Theme: old year in title penalty "
-                                f"({ytitle_year} vs series {year}) — '{vtitle}'"
-                            )
-
-            # --- Year proximity (upload date) ---
+            # Year proximity (upload date)
             if upload_date and year:
                 try:
                     upload_year = int(upload_date[:4])
@@ -1018,64 +1058,97 @@ class VideoScorer:
                 except (ValueError, TypeError):
                     pass
 
-            # --- Engagement ---
+            # Network / studio in title or channel (strong official indicator)
+            if network:
+                network_lower = network.lower()
+                if network_lower in vtitle_lower:
+                    score += 30
+                    if self.verbose:
+                        logger.info(
+                            f"[VERBOSE] Theme: network in title +30 ({network})"
+                        )
+                if network_lower in channel_lower:
+                    score += 25
+                    if self.verbose:
+                        logger.info(f"[VERBOSE] Theme: network channel +25 ({network})")
+
+            # Engagement (view count + like ratio)
             score += self._score_engagement(view_count, like_count)
 
-            # --- Artist-name pattern: "MediaTitle - Song Name" → media title is the artist ---
-            if vtitle_lower.startswith(
-                media_title.lower() + " -"
-            ) or vtitle_lower.startswith(media_title.lower() + "- "):
-                score -= 40
-                if self.verbose:
-                    logger.info(
-                        f"[VERBOSE] Theme: artist-name pattern penalty — '{vtitle}'"
-                    )
+            # ── PENALTIES ────────────────────────────────────────────────────
 
-            # --- Penalties ---
+            # Old year in title (e.g. series from 2025 but title says 1979)
+            if year:
+                m = re.search(r"\b((?:18|19|20)\d{2})\b", vtitle)
+                if m and year - int(m.group(1)) >= 10:
+                    score -= 50
+                    if self.verbose:
+                        logger.info(
+                            f"[VERBOSE] Theme: old year penalty ({m.group(1)}) — '{vtitle}'"
+                        )
+
+            # Cover / tribute / remix
             if any(kw in vtitle_lower for kw in cover_keywords):
-                score -= 25
+                score -= 70
                 if self.verbose:
                     logger.info(f"[VERBOSE] Theme: cover/tribute penalty — '{vtitle}'")
 
-            if any(kw in vtitle_lower for kw in noise_keywords):
-                score -= 30
-                if self.verbose:
-                    logger.info(f"[VERBOSE] Theme: noise-content penalty — '{vtitle}'")
-
+            # Trailer / teaser
             if "trailer" in vtitle_lower or "teaser" in vtitle_lower:
-                score -= 30
+                score -= 40
                 if self.verbose:
                     logger.info(f"[VERBOSE] Theme: trailer/teaser penalty — '{vtitle}'")
 
+            # Duration checks
             if duration is not None:
                 if duration < 20:
                     score -= 20
                 elif duration > 600:  # > 10 min → likely album/compilation
                     score -= 30
 
+            # Individual OST track patterns (not main theme)
+            if re.search(r"(?:soundtrack|score)\s*\|.+\s+-\s+\S", vtitle_lower):
+                score -= 60
+            if re.search(
+                r"\b(?:soundtrack|score)\b[^|]*-\s*0?\d{1,2}[\s:]", vtitle_lower
+            ):
+                score -= 60
+
             video["_score"] = score
             scored.append(video)
 
             if self.verbose:
                 logger.info(
-                    f"[VERBOSE] Theme candidate: '{vtitle}' → score {score:.1f}"
+                    f"[VERBOSE] Theme candidate: '{vtitle}' "
+                    f"→ score {score:.1f} (views: {view_count:,})"
                 )
 
         if not scored:
+            logger.warning("No theme videos passed minimum criteria (all rejected)")
             return None
 
-        best = max(scored, key=lambda v: v.get("_score", 0))
+        # Sort and log
+        scored.sort(key=lambda v: v.get("_score", 0), reverse=True)
+        if self.verbose:
+            logger.info(f"[VERBOSE] Theme: {len(scored)} candidate(s) passed filters")
+            for v in scored[:5]:
+                logger.info(
+                    f"[VERBOSE]   '{v.get('title')}' → {v.get('_score', 0):.1f} "
+                    f"(views: {v.get('view_count', 0):,})"
+                )
+
+        best = scored[0]
         best_score = best.get("_score", 0)
 
-        if best_score < self.min_score:
+        if best_score < self.theme_min_score:
             if self.verbose:
                 logger.info(
                     f"[VERBOSE] Theme: best score {best_score:.1f} below "
-                    f"threshold {self.min_score} — rejected"
+                    f"threshold {self.theme_min_score} — rejected"
                 )
             logger.warning(
                 f"No theme with acceptable score found "
-                f"(best: {best_score:.1f}, min: {self.min_score})"
+                f"(best: {best_score:.1f}, min: {self.theme_min_score})"
             )
             return None
 
