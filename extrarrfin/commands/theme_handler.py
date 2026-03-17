@@ -160,6 +160,7 @@ def download_theme_mode(
                 year=movie.year,
                 tmdb_id=movie.tmdb_id,
                 network=movie.studio,
+                is_series=False,
             )
 
             if ok:

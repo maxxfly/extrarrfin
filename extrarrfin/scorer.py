@@ -903,6 +903,12 @@ class VideoScorer:
             "title sequence",
             "opening",
             "credits",
+            "lyric video",  # Official lyric videos from studios are valid theme releases
+            "music video",  # Official music videos for the main song (e.g. Shakira - Zoo)
+            "album",  # Full album streams from composer/label channels
+            "trailer music",  # Last-resort: recreations of trailer music (penalised below)
+            "trailer theme",  # Last-resort: trailer theme versions (penalised below)
+            "trailer score",  # Last-resort: trailer score versions (penalised below)
         ]
         cover_keywords = [
             "cover",
@@ -919,7 +925,7 @@ class VideoScorer:
             "8-bit",
             "8bit",
             "lyrics",
-            "lyric video",
+            # "lyric video" intentionally NOT here — official lyric videos from studios are OK
         ]
         # Promotional/noise content — definitely NOT theme music
         reject_keywords = [
@@ -942,9 +948,45 @@ class VideoScorer:
             "explained",
             "gameplay",
             "walkthrough",
+            # Fan-edit / rhythm-game style formats (healthbar overlays, beat saber, etc.)
+            "healthbars",
+            "health bar",
+            "with healthbar",
+            "but with healthbars",
+            # Theater ident / logos reel — NOT theme music
+            "opening logos",
+            "theater logos",
+            "theatre logos",
+            # Karaoke / sing-along editions — modified versions, not the original theme
+            "sing along",
+            "singalong",
+            "sing-along",
+            # Post-credit / mid-credit scenes — NOT theme music
+            "post-credit scene",
+            "post credit scene",
+            "mid-credit scene",
+            "mid credit scene",
+            "credit scene",
+            "end credit scene",
+            "end-credit scene",
         ]
 
         scored: list[dict] = []
+
+        def _kw_match(kw: str, text: str) -> bool:
+            """Match keyword in text.
+
+            Short abbreviations (≤ 4 chars, e.g. 'ost') are matched as whole
+            words only (\\b boundaries) to avoid false positives such as
+            'ost' matching inside 'poster' or 'Boston'.
+            Longer phrases are matched as substrings.
+            """
+            if len(kw) <= 4:
+                return bool(re.search(r"\b" + re.escape(kw) + r"\b", text))
+            return kw in text
+
+        def _any_kw(keywords: list, text: str) -> bool:
+            return any(_kw_match(kw, text) for kw in keywords)
 
         for video in videos:
             if not video or not video.get("id"):
@@ -1005,7 +1047,7 @@ class VideoScorer:
             all_theme_kw = (
                 strong_theme_kw + soft_theme_kw + ["music", "song", "audio", "sound"]
             )
-            if not any(kw in vtitle_lower for kw in all_theme_kw):
+            if not _any_kw(all_theme_kw, vtitle_lower):
                 if self.verbose:
                     logger.info(
                         f"[VERBOSE] Theme: REJECT no music keyword found — '{vtitle}'"
@@ -1031,11 +1073,11 @@ class VideoScorer:
                     score -= 50
 
             # Strong theme keyword (main theme, opening theme, ost…)
-            if any(kw in vtitle_lower for kw in strong_theme_kw):
+            if _any_kw(strong_theme_kw, vtitle_lower):
                 score += 50
                 if self.verbose:
                     logger.info("[VERBOSE] Theme: strong theme keyword +50")
-            elif any(kw in vtitle_lower for kw in soft_theme_kw):
+            elif _any_kw(soft_theme_kw, vtitle_lower):
                 score += 25
                 if self.verbose:
                     logger.info("[VERBOSE] Theme: soft theme keyword +25")
@@ -1075,6 +1117,22 @@ class VideoScorer:
             # Engagement (view count + like ratio)
             score += self._score_engagement(view_count, like_count)
 
+            # Official release quality bonuses
+            # VEVO = official music label / studio channel (e.g. DisneyMusicVEVO)
+            if "vevo" in channel_lower:
+                score += 20
+                if self.verbose:
+                    logger.info(f"[VERBOSE] Theme: VEVO channel bonus +20 ({channel})")
+
+            # 10M+ views — official music videos / soundtracks reach this scale;
+            # fan uploads rarely do. This helps tip the balance toward official releases.
+            if view_count >= 10_000_000:
+                score += 20
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] Theme: 10M+ views bonus +20 ({view_count:,} views)"
+                    )
+
             # ── PENALTIES ────────────────────────────────────────────────────
 
             # Old year in title (e.g. series from 2025 but title says 1979)
@@ -1093,11 +1151,36 @@ class VideoScorer:
                 if self.verbose:
                     logger.info(f"[VERBOSE] Theme: cover/tribute penalty — '{vtitle}'")
 
-            # Trailer / teaser
-            if "trailer" in vtitle_lower or "teaser" in vtitle_lower:
+            # Trailer / teaser — penalise promotional trailers but NOT "trailer music/theme"
+            # editions which are legitimate music recreations of a film's trailer score.
+            _is_trailer_music = any(
+                kw in vtitle_lower
+                for kw in ["trailer music", "trailer theme", "trailer score"]
+            )
+            if (
+                "trailer" in vtitle_lower or "teaser" in vtitle_lower
+            ) and not _is_trailer_music:
                 score -= 40
                 if self.verbose:
                     logger.info(f"[VERBOSE] Theme: trailer/teaser penalty — '{vtitle}'")
+
+            # Trailer music / theme versions are last-resort only: they are fan recreations
+            # of trailer music, not the official score. Penalise so official themes win.
+            if _is_trailer_music:
+                score -= 40
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] Theme: trailer-music last-resort penalty -40 — '{vtitle}'"
+                    )
+
+            # "Concept Score/OST/Theme" — fan-made music in the style of the official score.
+            # These are NOT the actual soundtrack; penalise so official releases win.
+            if re.search(r"\bconcept\s+(?:score|ost|theme|soundtrack)\b", vtitle_lower):
+                score -= 50
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] Theme: concept-score (fan-made) penalty -50 — '{vtitle}'"
+                    )
 
             # Duration checks
             if duration is not None:

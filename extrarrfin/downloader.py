@@ -573,13 +573,14 @@ class Downloader:
         tvdb_id: int | None = None,
         tmdb_id: int | None = None,
         network: str | None = None,
+        is_series: bool = True,
     ) -> Tuple[bool, str | None, str | None]:
         """
         Search for and download the musical theme of a movie or series.
 
         Sources are tried in order:
         1. ThemerrDB – direct lookup by TVDB/TMDB ID (most accurate)
-        2. TelevisionTunes – web search + direct MP3 download
+        2. TelevisionTunes – web search + direct MP3 download (TV shows only)
         3. YouTube – scored search with VideoScorer (fallback)
 
         Returns:
@@ -617,13 +618,14 @@ class Downloader:
             logger.info(f"ThemerrDB miss for '{title}': {err}")
             errors.append(f"ThemerrDB: {err}")
 
-        # 2. TelevisionTunes
-        ok, path, err = self._try_televisiontunes(title, output_dir, dry_run)
-        self._purge_non_mp3_theme_files(output_dir)
-        if ok:
-            return ok, path, err
-        logger.info(f"TelevisionTunes miss for '{title}': {err}")
-        errors.append(f"TelevisionTunes: {err}")
+        # 2. TelevisionTunes (TV shows only)
+        if is_series:
+            ok, path, err = self._try_televisiontunes(title, output_dir, dry_run)
+            self._purge_non_mp3_theme_files(output_dir)
+            if ok:
+                return ok, path, err
+            logger.info(f"TelevisionTunes miss for '{title}': {err}")
+            errors.append(f"TelevisionTunes: {err}")
 
         # 3. YouTube fallback
         ok, path, err = self._try_youtube_theme(
