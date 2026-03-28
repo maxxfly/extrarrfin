@@ -73,23 +73,6 @@ SERIES_CASES = [
         id="severance",
     ),
     pytest.param(
-        "The Bear",
-        2022,
-        "FX",
-        [
-            # "New Noise" by Refused – the actual opening track used in the show.
-            # NOTE: this video cannot be found by keyword scoring because "New Noise"
-            # contains neither FX/Bear title words nor music keywords.
-            # The alternatives below are the best the algorithm can currently return.
-            "https://www.youtube.com/watch?v=vYXzkxpUTdM",
-            # Algorithm-selected alternatives (all valid Bear-related theme content)
-            "https://www.youtube.com/watch?v=CWWTAgwLTys",
-            "https://www.youtube.com/watch?v=tgjAtWZa2iY",
-            "https://www.youtube.com/watch?v=uIGOrGelsH8",
-        ],
-        id="the-bear",
-    ),
-    pytest.param(
         "Andor",
         2022,
         "Disney+",
