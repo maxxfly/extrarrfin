@@ -6,3 +6,6 @@ rich>=13.7.0
 schedule>=1.2.0
 mypy>=1.8.0
 ruff>=0.1.0
+pytest>=8.0.0
+types-requests>=2.31.0
+types-PyYAML>=6.0.0

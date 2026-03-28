@@ -18,6 +18,7 @@
 - 🎬 **Radarr support** — download extras for movies (tag mode)
 - 🏷️ **Tag mode** — download behind-the-scenes via `want-extras` tag ([see TAG_MODE.md](TAG_MODE.md))
 - 🎵 **Theme music** — downloads `theme.mp3` for every series and movie (ThemerrDB → TelevisionTunes → YouTube) ⚠️ *work in progress — some titles may get incorrect matches (see below)*
+- 🔎 **`list-themes`** — dedicated command to check `theme.mp3` status at a glance; `--more-info` adds Year & Network/Studio columns
 - 📝 **Subtitles** — automatic download and SRT conversion
 - 📺 **STRM mode** — streaming files instead of downloads (saves disk space)
 - ⏰ **Schedule mode** — periodic automatic downloads

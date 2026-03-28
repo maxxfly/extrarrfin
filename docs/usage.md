@@ -10,6 +10,7 @@
 |---------|-------------|
 | [`test`](#test) | Test connections to Sonarr, Radarr and Jellyfin |
 | [`list`](#list) | Display a table of series/movies and their status |
+| [`list-themes`](#list-themes) | Show `theme.mp3` status for all series & movies (with Year / Network) |
 | [`download`](#download) | Download missing Season 0 episodes or extras |
 | [`theme`](#theme) | Download `theme.mp3` for series and movies |
 | [`scan`](#scan) | Trigger a manual Sonarr rescan |
@@ -98,6 +99,43 @@ Theme Music — 4 items (3 series, 1 movies)
 │ 📺 TV   │ 43 │ The Office   │ /media/TV Shows/… │ ✗ No      │ -       │
 │ 🎬 Movie│ 12 │ Inception    │ /media/Movies/…   │ ✗ No      │ -       │
 Summary: 1 with theme.mp3  2 missing
+```
+
+---
+
+## `list-themes`
+
+Dedicated shortcut to display `theme.mp3` download status for every series and movie that has at least one downloaded file.
+
+Equivalent to `list --mode theme`.
+
+```bash
+# Basic table (Type / ID / Title / Path / theme.mp3 / Size)
+python extrarrfin.py list-themes
+
+# Filter by name or Sonarr/Radarr ID
+python extrarrfin.py list-themes --limit "Stranger Things"
+python extrarrfin.py list-themes -l 42
+```
+
+### `--more-info` / `-i`
+
+Add two extra columns — **Year** and **Network / Studio** — which are exactly the fields needed to write a new test case in `tests/test_youtube_search.py`:
+
+```bash
+python extrarrfin.py list-themes --more-info
+python extrarrfin.py list-themes -i --limit "Stranger"
+```
+
+**Example output with `--more-info`:**
+```
+Theme Music — 3 items (2 series, 1 movies)
+┃ Type    ┃ ID ┃ Title          ┃ Year ┃ Network / Studio ┃ Path   ┃ theme.mp3 ┃ Size    ┃
+│ 📺 TV   │ 1  │ Stranger Things│ 2016 │ Netflix          │ /…     │ ✓ Yes     │ 3.84 MB │
+│ 📺 TV   │ 2  │ The Last of Us │ 2023 │ HBO              │ /…     │ ✗ No      │ -       │
+│ 🎬 Movie│ 10 │ Dune           │ 2021 │ Legendary Pictur │ /…     │ ✓ Yes     │ 4.12 MB │
+
+Summary: 2 with theme.mp3  1 missing
 ```
 
 ---

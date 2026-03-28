@@ -145,6 +145,34 @@ def list(ctx, limit, mode):
         list_command(config, sonarr, downloader, radarr, limit, modes)
 
 
+@cli.command(name="list-themes")
+@click.option("--limit", "-l", help="Filter by series/movie name or Sonarr/Radarr ID")
+@click.option(
+    "--more-info",
+    "-i",
+    is_flag=True,
+    default=False,
+    help="Show Year and Network/Studio columns (useful to build test_youtube_search.py cases)",
+)
+@click.pass_context
+def list_themes_cmd(ctx, limit, more_info):
+    """List all series and movies showing whether theme.mp3 is downloaded.
+
+    Shows a table with ✓/✗ status for each title that has at least one
+    downloaded file, along with the file size when present.
+
+    Use --more-info / -i to also display Year and Network/Studio — handy
+    when adding new entries to tests/test_youtube_search.py.
+
+    Alias for: list --mode theme
+    """
+    config: Config = ctx.obj["config"]
+    sonarr: SonarrClient = ctx.obj["sonarr"]
+    downloader: Downloader = ctx.obj["downloader"]
+    radarr: RadarrClient | None = ctx.obj.get("radarr")
+    list_themes(config, sonarr, downloader, radarr, limit, more_info=more_info)
+
+
 @cli.command()
 @click.option("--limit", "-l", help="Limit to specific series (name or ID)")
 @click.option(

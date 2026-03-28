@@ -340,8 +340,13 @@ def list_themes(
     downloader: Downloader,
     radarr: RadarrClient | None = None,
     limit: str | None = None,
+    more_info: bool = False,
 ) -> None:
-    """Display a table showing which series and movies have a theme.mp3 file."""
+    """Display a table showing which series and movies have a theme.mp3 file.
+
+    When *more_info* is True, extra columns (Year, Network/Studio) are shown
+    to make it easier to write / extend test_youtube_search.py test cases.
+    """
 
     with Progress(
         SpinnerColumn(),
@@ -393,6 +398,9 @@ def list_themes(
     table.add_column("Type", style="yellow", width=9)
     table.add_column("ID", style="cyan")
     table.add_column("Title", style="green")
+    if more_info:
+        table.add_column("Year", style="magenta", justify="right")
+        table.add_column("Network / Studio", style="blue")
     table.add_column("Path", style="dim")
     table.add_column("theme.mp3", style="bold", justify="center")
     table.add_column("Size", style="cyan", justify="right")
@@ -406,6 +414,14 @@ def list_themes(
         type_text = (
             f"{type_emoji} TV" if item["type"] == "series" else f"{type_emoji} Movie"
         )
+
+        # Extra info columns (only when --more-info is active)
+        if more_info:
+            year_str = str(media.year) if media.year else "-"
+            if item["type"] == "series":
+                network_str = cast(Series, media).network or "-"
+            else:
+                network_str = cast(Movie, media).studio or "-"
 
         try:
             if item["type"] == "series":
@@ -445,14 +461,26 @@ def list_themes(
             size_str = "-"
             without_theme += 1
 
-        table.add_row(
-            type_text,
-            str(media.id),
-            media.title,
-            media.path,
-            status,
-            size_str,
-        )
+        if more_info:
+            table.add_row(
+                type_text,
+                str(media.id),
+                media.title,
+                year_str,
+                network_str,
+                media.path,
+                status,
+                size_str,
+            )
+        else:
+            table.add_row(
+                type_text,
+                str(media.id),
+                media.title,
+                media.path,
+                status,
+                size_str,
+            )
 
     console.print(table)
     console.print(

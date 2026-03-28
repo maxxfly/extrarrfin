@@ -1,4 +1,4 @@
-.PHONY: help install lint type check format clean test
+.PHONY: help install lint type check format clean test pytest
 
 help:
 	@echo "Available targets:"
@@ -9,6 +9,7 @@ help:
 	@echo "  format     - Format code with ruff"
 	@echo "  clean      - Remove Python cache files"
 	@echo "  test       - Run all checks (lint + type)"
+	@echo "  pytest     - Run integration tests (requires internet)"
 
 install:
 	pip install -r requirements.txt
@@ -38,3 +39,7 @@ clean:
 
 test: check
 	@echo "Tests completed!"
+
+pytest:
+	@echo "Running pytest integration tests..."
+	.venv/bin/pytest tests/ -v -m integration
