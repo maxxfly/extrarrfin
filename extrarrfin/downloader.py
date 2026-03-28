@@ -525,6 +525,25 @@ class Downloader:
                 except Exception as e4:
                     logger.debug(f"Quaternary theme search failed: {e4}")
 
+            # ---- Quinary search: "main title theme" — surfaces official title
+            # card / main title releases that the previous queries may miss.
+            query5 = f"{title_year} main title theme"
+            if self.verbose:
+                logger.info(f"[VERBOSE] YouTube theme quinary search: '{query5}'")
+            try:
+                with yt_dlp.YoutubeDL(ydl_search_opts) as ydl5:
+                    result5 = ydl5.extract_info(
+                        f"ytsearch{self.youtube_search_results}:{query5}",
+                        download=False,
+                    )
+                if result5 and "entries" in result5:
+                    for e in result5["entries"]:
+                        if e and e.get("id") and e["id"] not in seen_ids:
+                            all_entries.append(e)
+                            seen_ids.add(e["id"])
+            except Exception as e5:
+                logger.debug(f"Quinary theme search failed: {e5}")
+
             if not all_entries:
                 return False, None, f"No YouTube results found for: {query}"
 

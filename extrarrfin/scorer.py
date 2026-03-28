@@ -925,6 +925,14 @@ class VideoScorer:
             "8-bit",
             "8bit",
             "lyrics",
+            # Fan-orchestral / "epic" re-arrangements — NOT the original theme
+            "epic version",
+            "epic remix",
+            "epic cover",
+            "orchestral version",
+            "metal version",
+            "metal cover",
+            "but epic",
             # "lyric video" intentionally NOT here — official lyric videos from studios are OK
         ]
         # Promotional/noise content — definitely NOT theme music
@@ -1135,15 +1143,50 @@ class VideoScorer:
 
             # ── PENALTIES ────────────────────────────────────────────────────
 
-            # Old year in title (e.g. series from 2025 but title says 1979)
+            # Old year in title — check ALL years, not just the first one.
+            # Bug-fix: re.search("The Batman 2022 Theme to 1989 Credits") would
+            # find "2022" first and never penalise "1989".  re.findall finds all
+            # years and we penalise as soon as any one of them is too old.
             if year:
-                m = re.search(r"\b((?:18|19|20)\d{2})\b", vtitle)
-                if m and year - int(m.group(1)) >= 10:
-                    score -= 50
-                    if self.verbose:
-                        logger.info(
-                            f"[VERBOSE] Theme: old year penalty ({m.group(1)}) — '{vtitle}'"
-                        )
+                for yr_str in re.findall(r"\b((?:18|19|20)\d{2})\b", vtitle):
+                    if year - int(yr_str) >= 10:
+                        score -= 50
+                        if self.verbose:
+                            logger.info(
+                                f"[VERBOSE] Theme: old year penalty ({yr_str}) — '{vtitle}'"
+                            )
+                        break  # apply once even if multiple old years
+
+            # Episode-specific track: "Episode 3 Soundtrack", "S01E02" etc.
+            # These are tracks tied to a single episode, NOT the main theme.
+            if re.search(r"\bEpisode\s+\d+\b", vtitle, re.IGNORECASE):
+                score -= 60
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] Theme: episode-specific track penalty -60 — '{vtitle}'"
+                    )
+
+            # "also titled X" — the video is primarily about a *different* show
+            # that shares a keyword with our title (e.g. "B.J. and the Bear").
+            if re.search(r"\balso\s+titled\b", vtitle_lower):
+                score -= 80
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] Theme: 'also titled' penalty -80 (wrong show) — '{vtitle}'"
+                    )
+
+            # "ft. Main Theme" / "feat. Main Theme" — this is a compilation that
+            # *features* the main theme, not the main theme track itself.
+            if re.search(
+                r"\bft\.\s+(?:main\s+theme|opening\s+theme|theme\s+song)\b"
+                r"|\bfeat(?:uring)?\.\s+(?:main\s+theme|opening\s+theme|theme\s+song)\b",
+                vtitle_lower,
+            ):
+                score -= 60
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] Theme: 'ft. Main Theme' compilation penalty -60 — '{vtitle}'"
+                    )
 
             # Cover / tribute / remix
             if any(kw in vtitle_lower for kw in cover_keywords):
