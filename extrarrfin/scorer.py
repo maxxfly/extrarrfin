@@ -996,12 +996,17 @@ class VideoScorer:
         def _any_kw(keywords: list, text: str) -> bool:
             return any(_kw_match(kw, text) for kw in keywords)
 
+        def _compact(text: str) -> str:
+            return re.sub(r"[^a-z0-9]+", "", text.lower())
+
         for video in videos:
             if not video or not video.get("id"):
                 continue
 
             vtitle = video.get("title", "")
             vtitle_lower = vtitle.lower()
+            description = video.get("description") or ""
+            description_lower = description.lower()
             duration = video.get("duration")
             view_count = video.get("view_count") or 0
             like_count = video.get("like_count")
@@ -1028,7 +1033,13 @@ class VideoScorer:
                     )
                 continue
 
-            # 3. K-drama/K-pop fan video formats:
+            # 3. Fan mashups are not the original theme/soundtrack.
+            if "mashup" in vtitle_lower or "mashup" in description_lower:
+                if self.verbose:
+                    logger.info(f"[VERBOSE] Theme: REJECT mashup/fan edit — '{vtitle}'")
+                continue
+
+            # 4. K-drama/K-pop fan video formats:
             #    "[MV]", "[FMV]", "[AMV]", "[PMV]", "[Official MV]" etc.
             _fan_video_prefix = re.match(r"^\[([a-z]{1,8})\]", vtitle_lower)
             if _fan_video_prefix:
@@ -1042,7 +1053,7 @@ class VideoScorer:
                         )
                     continue
 
-            # 4. "OST Part.X" or "OST | Track Name" = specific track from an OST album
+            # 5. "OST Part.X" or "OST | Track Name" = specific track from an OST album
             if re.search(r"\bost\s+part\b", vtitle_lower) or re.search(
                 r"\bost\s*\|", vtitle_lower
             ):
@@ -1050,7 +1061,7 @@ class VideoScorer:
                     logger.info(f"[VERBOSE] Theme: REJECT OST album track — '{vtitle}'")
                 continue
 
-            # 5. Must contain at least one music/theme keyword
+            # 6. Must contain at least one music/theme keyword
             # Interviews, making-of, news segments etc. about the show are NOT themes
             all_theme_kw = (
                 strong_theme_kw + soft_theme_kw + ["music", "song", "audio", "sound"]
@@ -1111,13 +1122,21 @@ class VideoScorer:
             # Network / studio in title or channel (strong official indicator)
             if network:
                 network_lower = network.lower()
-                if network_lower in vtitle_lower:
+                network_compact = _compact(network_lower)
+                title_compact = _compact(vtitle_lower)
+                channel_compact = _compact(channel_lower)
+
+                if network_lower in vtitle_lower or (
+                    len(network_compact) >= 5 and network_compact in title_compact
+                ):
                     score += 30
                     if self.verbose:
                         logger.info(
                             f"[VERBOSE] Theme: network in title +30 ({network})"
                         )
-                if network_lower in channel_lower:
+                if network_lower in channel_lower or (
+                    len(network_compact) >= 5 and network_compact in channel_compact
+                ):
                     score += 25
                     if self.verbose:
                         logger.info(f"[VERBOSE] Theme: network channel +25 ({network})")

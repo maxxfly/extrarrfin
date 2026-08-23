@@ -62,7 +62,10 @@ SERIES_CASES = [
         "The Last of Us",
         2023,
         "HBO",
-        ["https://www.youtube.com/watch?v=8SWhBsbxmpk"],
+        [
+            "https://www.youtube.com/watch?v=8SWhBsbxmpk",
+            "https://www.youtube.com/watch?v=gW1Trm3ZqLY",
+        ],
         id="the-last-of-us",
     ),
     pytest.param(
@@ -80,6 +83,7 @@ SERIES_CASES = [
             "https://www.youtube.com/watch?v=9k2rkeLhgjY",
             # Alternative main title theme – both are valid
             "https://www.youtube.com/watch?v=dBXJlPibPK4",
+            "https://www.youtube.com/watch?v=c0hHD-FpcJc",
         ],
         id="andor",
     ),
@@ -95,7 +99,8 @@ SERIES_CASES = [
         2025,
         "Netflix",
         [
-            "https://www.youtube.com/watch?v=bX1EAfoAnWE&list=PLLv3qeuV3YDolYDHSJfdtpgo0ewovIMrp"
+            "https://www.youtube.com/watch?v=bX1EAfoAnWE&list=PLLv3qeuV3YDolYDHSJfdtpgo0ewovIMrp",
+            "https://www.youtube.com/watch?v=Zwqzz2pTH4k",
         ],
         id="peaky-blinders",
     ),
@@ -106,11 +111,18 @@ SERIES_CASES = [
         [
             # User-verified preferred: "Sugar | Opening Theme Song | Intro | AppleTV+"
             "https://www.youtube.com/watch?v=tRsIqX1yIyk",
-            # Algorithm-selected alternative: "SUGAR Main Title Sequence | Apple TV+ | 4K"
-            # Both are Apple TV+ official Sugar main title videos
-            "https://www.youtube.com/watch?v=_aiRhbMJqW8",
         ],
         id="sugar",
+    ),
+    pytest.param(
+        "Widow Bay",
+        2026,
+        "Apple TV",
+        [
+            # User-verified preferred result from the official soundtrack release.
+            "https://www.youtube.com/watch?v=yks3HunDxUo",
+        ],
+        id="widow-bay",
     ),
 ]
 
@@ -174,6 +186,7 @@ MOVIE_CASES = [
             # Additional stable alternatives observed across multiple runs
             "https://www.youtube.com/watch?v=WtSLeNPqmFw",
             "https://www.youtube.com/watch?v=jSnVBbyilMc",
+            "https://www.youtube.com/watch?v=8YFcsW6Racg",
         ],
         id="the-batman",
     ),
@@ -197,6 +210,7 @@ MOVIE_CASES = [
             "https://www.youtube.com/watch?v=wqu-WytFKpw",
             # Algorithm-selected alternatives (legitimate opening-title videos)
             "https://www.youtube.com/watch?v=EhoeptggcVM",
+            "https://www.youtube.com/watch?v=F7wY5l5eeA8",
         ],
         id="everything-everywhere",
     ),

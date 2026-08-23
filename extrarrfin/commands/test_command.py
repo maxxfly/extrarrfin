@@ -91,3 +91,6 @@ def test_command(
     except Exception as e:
         console.print(f"[red]✗ Connection error:[/red] {e}")
         sys.exit(1)
+
+
+setattr(test_command, "__test__", False)
