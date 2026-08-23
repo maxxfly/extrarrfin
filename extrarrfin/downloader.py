@@ -625,9 +625,7 @@ class Downloader:
                 "playback on other websites has been disabled",
             ]
             if any(marker in message for marker in unavailable_markers):
-                logger.debug(
-                    f"YouTube theme candidate unavailable ({video_id}): {exc}"
-                )
+                logger.debug(f"YouTube theme candidate unavailable ({video_id}): {exc}")
                 return False
 
             # Treat transient extraction/network issues as inconclusive so we do
