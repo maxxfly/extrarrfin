@@ -91,7 +91,10 @@ SERIES_CASES = [
         "Peaky Blinders",
         2013,
         "BBC",
-        ["https://www.youtube.com/watch?v=zCs4mnaoB64"],
+        [
+            "https://www.youtube.com/watch?v=zCs4mnaoB64",
+            "https://www.youtube.com/watch?v=Be56k1Ui2Yg",
+        ],
         id="peaky-blinders",
     ),
     pytest.param(

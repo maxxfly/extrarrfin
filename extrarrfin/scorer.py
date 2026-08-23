@@ -6,6 +6,7 @@ Separates scoring logic from download functionality for better testability
 import logging
 import math
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from .models import Series
@@ -73,6 +74,31 @@ class VideoScorer:
         # MUCH lower threshold for theme scoring - themes are hard to match
         # Official themes often have lower engagement than regular content
         self.theme_min_score = min(min_score - 15, 35.0)
+
+    def _normalize_text(self, text: str) -> str:
+        """Normalize text for fuzzy comparisons across punctuation/accents."""
+        if not text:
+            return ""
+
+        normalized = unicodedata.normalize("NFKD", text)
+        ascii_text = "".join(
+            ch for ch in normalized if not unicodedata.combining(ch)
+        ).lower()
+        return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", ascii_text)).strip()
+
+    def _compact_text(self, text: str) -> str:
+        """Normalize text and remove separators for compact matching."""
+        return self._normalize_text(text).replace(" ", "")
+
+    def _significant_words(
+        self, text: str, stopwords: set[str] | None = None, min_len: int = 3
+    ) -> list[str]:
+        """Extract significant normalized words from a title/query."""
+        return [
+            word
+            for word in self._normalize_text(text).split()
+            if len(word) >= min_len and word not in (stopwords or set())
+        ]
 
     def score_and_select_video(
         self, videos: list, series: Series, episode_title: str
@@ -221,8 +247,15 @@ class VideoScorer:
         if not network_lower or not channel:
             return 0.0
 
+        compact_network = self._compact_text(network_lower)
+        compact_channel = self._compact_text(channel_lower)
+
         # Exact or partial match
-        if network_lower in channel_lower or channel_lower in network_lower:
+        if (
+            network_lower in channel_lower
+            or channel_lower in network_lower
+            or (len(compact_network) >= 5 and compact_network in compact_channel)
+        ):
             if self.verbose:
                 logger.info(f"[VERBOSE] Network match bonus: {channel}")
             return self.weights.network_match
@@ -234,6 +267,66 @@ class VideoScorer:
             return self.weights.network_match
 
         return 0.0
+
+    def _score_theme_source_credibility(
+        self,
+        media_title: str,
+        network: str | None,
+        channel: str,
+        title: str,
+        description: str,
+    ) -> float:
+        """Reward official soundtrack-style metadata over generic reposts."""
+        score = 0.0
+        channel_lower = channel.lower()
+        description_lower = description.lower()
+        description_compact = self._compact_text(description)
+        media_compact = self._compact_text(media_title)
+        network_compact = self._compact_text(network or "")
+
+        trusted_channel_markers = [
+            "vevo",
+            "soundtrack",
+            "soundtracks",
+            "records",
+        ]
+        has_trusted_channel = any(
+            marker in channel_lower for marker in trusted_channel_markers
+        )
+        if has_trusted_channel:
+            score += 8
+
+        official_metadata_markers = [
+            "official soundtrack",
+            "original series soundtrack",
+            "original motion picture soundtrack",
+            "listen to the soundtrack",
+        ]
+        has_official_metadata = any(
+            marker in description_lower for marker in official_metadata_markers
+        )
+        if has_official_metadata:
+            score += 12
+
+        if has_trusted_channel and "provided to youtube by" in description_lower:
+            score += 6
+
+        if (
+            media_compact
+            and media_compact in description_compact
+            and has_official_metadata
+        ):
+            score += 6
+
+        if (
+            network_compact
+            and network_compact in description_compact
+            and has_official_metadata
+        ):
+            score += 4
+
+        # Cap the bonus so title/engagement still matter.
+        return min(score, 22.0)
 
     def _score_engagement(
         self, view_count: int | None, like_count: int | None
@@ -875,11 +968,7 @@ class VideoScorer:
             "le",
             "les",
         }
-        title_words = [
-            w.lower()
-            for w in re.split(r"\W+", media_title)
-            if len(w) >= 3 and w.lower() not in _stopwords
-        ]
+        title_words = self._significant_words(media_title, stopwords=_stopwords)
 
         strong_theme_kw = [
             "main theme",
@@ -978,6 +1067,25 @@ class VideoScorer:
             "end credit scene",
             "end-credit scene",
         ]
+        primary_theme_kw = [
+            "main theme",
+            "opening theme",
+            "theme song",
+            "main title",
+            "opening title",
+            "title sequence",
+            "opening credits",
+            "opening credit",
+            "title theme",
+            "intro theme",
+        ]
+        soundtrack_only_kw = [
+            "ost",
+            "original soundtrack",
+            "original score",
+            "soundtrack",
+            "score",
+        ]
 
         scored: list[dict] = []
 
@@ -996,8 +1104,12 @@ class VideoScorer:
         def _any_kw(keywords: list, text: str) -> bool:
             return any(_kw_match(kw, text) for kw in keywords)
 
-        def _compact(text: str) -> str:
-            return re.sub(r"[^a-z0-9]+", "", text.lower())
+        has_primary_theme_candidate = any(
+            video
+            and video.get("title")
+            and _any_kw(primary_theme_kw, str(video.get("title", "")).lower())
+            for video in videos
+        )
 
         for video in videos:
             if not video or not video.get("id"):
@@ -1005,6 +1117,7 @@ class VideoScorer:
 
             vtitle = video.get("title", "")
             vtitle_lower = vtitle.lower()
+            vtitle_normalized = self._normalize_text(vtitle)
             description = video.get("description") or ""
             description_lower = description.lower()
             duration = video.get("duration")
@@ -1077,7 +1190,7 @@ class VideoScorer:
 
             # Title word matching against media title
             if title_words:
-                matched = sum(1 for w in title_words if w in vtitle_lower)
+                matched = sum(1 for w in title_words if w in vtitle_normalized)
                 ratio = matched / len(title_words)
                 if ratio == 1.0:
                     score += 50  # All significant words present
@@ -1122,9 +1235,9 @@ class VideoScorer:
             # Network / studio in title or channel (strong official indicator)
             if network:
                 network_lower = network.lower()
-                network_compact = _compact(network_lower)
-                title_compact = _compact(vtitle_lower)
-                channel_compact = _compact(channel_lower)
+                network_compact = self._compact_text(network_lower)
+                title_compact = self._compact_text(vtitle_lower)
+                channel_compact = self._compact_text(channel_lower)
 
                 if network_lower in vtitle_lower or (
                     len(network_compact) >= 5 and network_compact in title_compact
@@ -1140,6 +1253,15 @@ class VideoScorer:
                     score += 25
                     if self.verbose:
                         logger.info(f"[VERBOSE] Theme: network channel +25 ({network})")
+
+            source_bonus = self._score_theme_source_credibility(
+                media_title, network, channel, vtitle, description
+            )
+            score += source_bonus
+            if self.verbose and source_bonus > 0:
+                logger.info(
+                    f"[VERBOSE] Theme: source credibility bonus +{source_bonus:.1f} ({channel})"
+                )
 
             # Engagement (view count + like ratio)
             score += self._score_engagement(view_count, like_count)
@@ -1235,6 +1357,15 @@ class VideoScorer:
                         f"[VERBOSE] Theme: trailer-music last-resort penalty -40 — '{vtitle}'"
                     )
 
+            # Description-level trailer mentions usually indicate a repost of trailer music,
+            # not the canonical main theme release.
+            if "trailer" in description_lower and not _is_trailer_music:
+                score -= 30
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] Theme: trailer mention in description penalty -30 — '{vtitle}'"
+                    )
+
             # "Concept Score/OST/Theme" — fan-made music in the style of the official score.
             # These are NOT the actual soundtrack; penalise so official releases win.
             if re.search(r"\bconcept\s+(?:score|ost|theme|soundtrack)\b", vtitle_lower):
@@ -1258,6 +1389,23 @@ class VideoScorer:
                 r"\b(?:soundtrack|score)\b[^|]*-\s*0?\d{1,2}[\s:]", vtitle_lower
             ):
                 score -= 60
+            if re.search(r"\b(?:score|soundtrack)\s+suite\b", vtitle_lower):
+                score -= 40
+
+            # When an explicit opening/title candidate exists, generic soundtrack-only
+            # uploads should lose priority to the actual opening/main-title match.
+            has_primary_theme_marker = _any_kw(primary_theme_kw, vtitle_lower)
+            has_soundtrack_only_marker = _any_kw(soundtrack_only_kw, vtitle_lower)
+            if (
+                has_primary_theme_candidate
+                and has_soundtrack_only_marker
+                and not has_primary_theme_marker
+            ):
+                score -= 35
+                if self.verbose:
+                    logger.info(
+                        f"[VERBOSE] Theme: soundtrack-only penalty with opening candidate -35 — '{vtitle}'"
+                    )
 
             video["_score"] = score
             scored.append(video)

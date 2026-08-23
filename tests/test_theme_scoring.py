@@ -64,3 +64,62 @@ def test_theme_scoring_matches_network_despite_punctuation_variants():
 
     assert best is not None
     assert best["id"] == "tRsIqX1yIyk"
+
+
+def test_theme_scoring_prefers_official_soundtrack_metadata_over_sequence_repost():
+    scorer = VideoScorer(min_score=30.0, verbose=False)
+
+    videos = [
+        {
+            "id": "sequence-repost",
+            "title": "Atlas Main Title Sequence | Apple TV+ | 4K",
+            "channel": "FrameVault",
+            "view_count": 16000,
+            "duration": 61.0,
+            "description": "A clean upload of the Atlas main title sequence.",
+        },
+        {
+            "id": "official-soundtrack",
+            "title": "Anne Nikitin - Atlas Main Theme | Apple TV+ Original Series Soundtrack",
+            "channel": "Lakeshore Records",
+            "view_count": 12000,
+            "duration": 95.0,
+            "description": (
+                "Official soundtrack release from Atlas. Music by Anne Nikitin. "
+                "Listen to the soundtrack now on Apple TV+."
+            ),
+        },
+    ]
+
+    best = scorer.score_theme_videos(videos, "Atlas", year=2024, network="Apple TV")
+
+    assert best is not None
+    assert best["id"] == "official-soundtrack"
+
+
+def test_theme_scoring_prioritizes_opening_over_soundtrack_when_both_exist():
+    scorer = VideoScorer(min_score=30.0, verbose=False)
+
+    videos = [
+        {
+            "id": "opening-choice",
+            "title": "Peaky Blinders Title sequence BBC TWO",
+            "channel": "Pierrick Allan",
+            "view_count": 9768,
+            "duration": 72.0,
+            "description": "Opening title sequence for Peaky Blinders.",
+        },
+        {
+            "id": "ost-choice",
+            "title": "Nick Cave And The Bad Seeds - Red Right Hand (Peaky Blinders OST)",
+            "channel": "Hege Abel",
+            "view_count": 63882143,
+            "duration": 374.0,
+            "description": "Song used in the Peaky Blinders soundtrack.",
+        },
+    ]
+
+    best = scorer.score_theme_videos(videos, "Peaky Blinders", year=2013, network="BBC")
+
+    assert best is not None
+    assert best["id"] == "opening-choice"

@@ -547,9 +547,29 @@ class Downloader:
             if not all_entries:
                 return False, None, f"No YouTube results found for: {query}"
 
-            video = self.scorer.score_theme_videos(
-                all_entries, title, year=year, network=network
-            )
+            remaining_entries = list(all_entries)
+            video = None
+            while remaining_entries:
+                candidate = self.scorer.score_theme_videos(
+                    remaining_entries, title, year=year, network=network
+                )
+                if not candidate:
+                    break
+
+                if self._is_youtube_video_available(candidate["id"]):
+                    video = candidate
+                    break
+
+                logger.warning(
+                    f"Skipping unavailable YouTube theme candidate: "
+                    f"{candidate.get('title', candidate['id'])} ({candidate['id']})"
+                )
+                remaining_entries = [
+                    entry
+                    for entry in remaining_entries
+                    if entry.get("id") != candidate["id"]
+                ]
+
             if not video:
                 return (
                     False,
@@ -581,6 +601,41 @@ class Downloader:
             error_msg = f"YouTube theme search error: {e}"
             logger.error(error_msg)
             return False, None, error_msg
+
+    def _is_youtube_video_available(self, video_id: str) -> bool:
+        """Return True when yt-dlp can still resolve the candidate video."""
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.extract_info(video_url, download=False)
+            return True
+        except Exception as exc:
+            message = str(exc).lower()
+            unavailable_markers = [
+                "video is not available",
+                "private video",
+                "this video has been removed",
+                "video unavailable",
+                "playback on other websites has been disabled",
+            ]
+            if any(marker in message for marker in unavailable_markers):
+                logger.debug(
+                    f"YouTube theme candidate unavailable ({video_id}): {exc}"
+                )
+                return False
+
+            # Treat transient extraction/network issues as inconclusive so we do
+            # not skip a good top candidate based on a flaky validation probe.
+            logger.debug(
+                f"YouTube theme candidate availability inconclusive ({video_id}): {exc}"
+            )
+            return True
 
     def download_theme(
         self,
