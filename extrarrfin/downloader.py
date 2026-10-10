@@ -15,8 +15,9 @@ import yt_dlp
 from .downloader_utils.nfo import NFOWriter
 from .downloader_utils.paths import PathManager
 from .downloader_utils.strm import STRMWriter
-from .models import Episode, Movie, Series
+from .models import Episode, EpisodeFileInfo, Movie, Series, VideoInfo
 from .scorer import ScoringWeights, VideoScorer
+from .themerrdb import ThemerrDBClient
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class Downloader:
         self._path_manager = PathManager()
         self._nfo_writer = NFOWriter()
         self._strm_writer = STRMWriter()
+        self.themerrdb = ThemerrDBClient()
 
     # Delegate to PathManager
     def sanitize_filename(self, filename: str) -> str:
@@ -170,10 +172,12 @@ class Downloader:
             "nocheckcertificate": nocheckcertificate,
         }
 
+        download_error: str | None = None
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 ydl.download([url])
             except Exception as ydl_err:
+                download_error = str(ydl_err)
                 logger.debug(f"yt-dlp download error: {ydl_err}")
 
         # Safeguard: remove any non-mp3 theme file the postprocessor may have
@@ -183,6 +187,11 @@ class Downloader:
 
         if theme_file.exists():
             return True, str(theme_file), None
+
+        # yt-dlp never wrote anything (blocked video, HTTP 403/429 rate limit,
+        # …): surface that reason instead of the misleading "nothing to convert".
+        if download_error is not None:
+            return False, None, f"yt-dlp download failed: {download_error}"
 
         # Fallback: postprocessor may have failed but raw file is present.
         # Convert manually with ffmpeg and clean up the source file.
@@ -233,49 +242,44 @@ class Downloader:
     def _try_themerrdb(
         self,
         title: str,
-        tvdb_id: int | None,
-        tmdb_id: int | None,
         output_dir: Path,
         dry_run: bool,
+        tmdb_id: int | None = None,
+        imdb_id: str | None = None,
+        is_series: bool = True,
     ) -> Tuple[bool, str | None, str | None]:
-        """Look up the YouTube theme URL from ThemerrDB and download it."""
-        base = "https://raw.githubusercontent.com/LizardByte/ThemerrDB/gh-pages/themes"
-        if tvdb_id:
-            lookup_url = f"{base}/tv/{tvdb_id}.json"
-            id_info = f"tvdb_id={tvdb_id}"
-        elif tmdb_id:
-            lookup_url = f"{base}/movies/{tmdb_id}.json"
-            id_info = f"tmdb_id={tmdb_id}"
-        else:
-            return False, None, "ThemerrDB: no TVDB/TMDB ID available"
+        """Look up the curated YouTube theme URL from ThemerrDB and download it.
 
+        Series are keyed by TMDB id, movies by TMDB id with IMDb as an
+        alternate key (see :mod:`extrarrfin.themerrdb`).
+        """
         try:
-            resp = requests.get(lookup_url, timeout=10)
-            if resp.status_code != 200:
-                return (
-                    False,
-                    None,
-                    f"ThemerrDB: not found for {id_info} (HTTP {resp.status_code})",
-                )
-
-            data = resp.json()
-            yt_url = data.get("youtube_theme_url")
-            if not yt_url:
-                return (
-                    False,
-                    None,
-                    f"ThemerrDB: no youtube_theme_url in response for '{title}'",
-                )
-
-            logger.info(f"ThemerrDB: found theme for '{title}': {yt_url}")
-            if dry_run:
-                theme_file = output_dir / "theme.mp3"
-                logger.info(f"DRY RUN: Would download via ThemerrDB: {yt_url}")
-                return True, str(theme_file), None
-
-            return self._download_audio_from_url(yt_url, output_dir)
+            if is_series:
+                theme = self.themerrdb.lookup_series(tmdb_id)
+            else:
+                theme = self.themerrdb.lookup_movie(tmdb_id, imdb_id)
         except Exception as e:
             return False, None, f"ThemerrDB error: {e}"
+
+        if theme is None:
+            if is_series:
+                id_info = f"tmdb_id={tmdb_id}" if tmdb_id else "no TMDB ID available"
+            else:
+                id_info = (
+                    f"tmdb_id={tmdb_id} / imdb_id={imdb_id}"
+                    if (tmdb_id or imdb_id)
+                    else "no TMDB/IMDb ID available"
+                )
+            return False, None, f"no curated theme for {id_info}"
+
+        yt_url = theme.youtube_url
+        logger.info(f"ThemerrDB: found theme for '{title}': {yt_url}")
+        if dry_run:
+            theme_file = output_dir / "theme.mp3"
+            logger.info(f"DRY RUN: Would download via ThemerrDB: {yt_url}")
+            return True, str(theme_file), None
+
+        return self._download_audio_from_url(yt_url, output_dir)
 
     def _try_televisiontunes(
         self,
@@ -452,7 +456,7 @@ class Downloader:
 
         try:
             # ---- Primary search: original score / soundtrack query ----
-            all_entries: list[dict] = []
+            all_entries: list[VideoInfo] = []
             seen_ids: set[str] = set()
 
             with yt_dlp.YoutubeDL(ydl_search_opts) as ydl:
@@ -642,18 +646,34 @@ class Downloader:
         dry_run: bool = False,
         force: bool = False,
         year: int | None = None,
-        tvdb_id: int | None = None,
         tmdb_id: int | None = None,
+        imdb_id: str | None = None,
         network: str | None = None,
         is_series: bool = True,
+        no_fallback: bool = False,
     ) -> Tuple[bool, str | None, str | None]:
         """
         Search for and download the musical theme of a movie or series.
 
         Sources are tried in order:
-        1. ThemerrDB – direct lookup by TVDB/TMDB ID (most accurate)
+        1. ThemerrDB – curated lookup by TMDB ID (series and movies), with the
+           IMDb ID as an alternate key for movies (most accurate)
         2. TelevisionTunes – web search + direct MP3 download (TV shows only)
         3. YouTube – scored search with VideoScorer (fallback)
+
+        Args:
+            title: Series or movie title.
+            output_dir: Directory that receives ``theme.mp3``.
+            dry_run: Log the chosen source without downloading.
+            force: Re-download even when ``theme.mp3`` already exists.
+            year: Release year, used by the YouTube fallback.
+            tmdb_id: TMDB id, the primary ThemerrDB key.
+            imdb_id: IMDb id, alternate ThemerrDB key for movies.
+            network: Network / studio, used by the YouTube fallback.
+            is_series: False for Radarr movies.
+            no_fallback: Skip the YouTube fallback and rely only on the curated
+                sources (ThemerrDB and TelevisionTunes). The title then counts
+                as a failure when neither curated source has a theme.
 
         Returns:
             Tuple (success, file_path_or_None, error_message_or_None)
@@ -679,10 +699,15 @@ class Downloader:
 
         errors: list[str] = []
 
-        # 1. ThemerrDB
-        if tvdb_id or tmdb_id:
+        # 1. ThemerrDB (keyed on TMDB, IMDb as alternate key for movies)
+        if tmdb_id or (not is_series and imdb_id):
             ok, path, err = self._try_themerrdb(
-                title, tvdb_id, tmdb_id, output_dir, dry_run
+                title,
+                output_dir,
+                dry_run,
+                tmdb_id=tmdb_id,
+                imdb_id=imdb_id,
+                is_series=is_series,
             )
             self._purge_non_mp3_theme_files(output_dir)
             if ok:
@@ -699,7 +724,19 @@ class Downloader:
             logger.info(f"TelevisionTunes miss for '{title}': {err}")
             errors.append(f"TelevisionTunes: {err}")
 
-        # 3. YouTube fallback
+        # 3. YouTube fallback — skipped on purpose with --no-fallback
+        if no_fallback:
+            if not errors:
+                return (
+                    False,
+                    None,
+                    (
+                        "no curated source available (ThemerrDB needs a TMDB/IMDb "
+                        "id, TelevisionTunes is for series only)"
+                    ),
+                )
+            return False, None, " | ".join(errors)
+
         ok, path, err = self._try_youtube_theme(
             title, year, output_dir, dry_run, network=network
         )
@@ -730,7 +767,7 @@ class Downloader:
         self,
         base_filename: str,
         output_directory: Path,
-        video_info: dict,
+        video_info: VideoInfo,
         nfo_type: str = "episode",
     ) -> None:
         """Create a .nfo file with video metadata"""
@@ -902,7 +939,7 @@ class Downloader:
 
     def search_youtube_behind_scenes(
         self, series: Series, exclude_ids: set[str] | None = None
-    ) -> list[dict] | None:
+    ) -> list[VideoInfo] | None:
         """
         Search for behind the scenes videos on YouTube
         Returns a list of video dictionaries with metadata (id, title, url, etc.)
@@ -1003,7 +1040,7 @@ class Downloader:
         verbose: bool = False,
         year: int | None = None,
         exclude_ids: set[str] | None = None,
-    ) -> dict | None:
+    ) -> VideoInfo | None:
         """
         Generic search for extras content on YouTube (movies or series)
         Returns the best matching video after validation
@@ -1224,7 +1261,7 @@ class Downloader:
         output_directory: Path,
         youtube_url: str,
         dry_run: bool = False,
-    ) -> Tuple[bool, str | None, str | None, dict | None]:
+    ) -> Tuple[bool, str | None, str | None, VideoInfo | None]:
         """
         Create a STRM file pointing to direct video stream URL and download subtitles
 
@@ -1284,7 +1321,7 @@ class Downloader:
 
     def _download_subtitles_only(
         self, youtube_url: str, output_directory: Path, base_filename: str
-    ):
+    ) -> None:
         """
         Download only subtitles for a YouTube video
 
@@ -1335,7 +1372,7 @@ class Downloader:
         force: bool = False,
         youtube_url: str | None = None,
         dry_run: bool = False,
-    ) -> Tuple[bool, str | None, str | None, dict | None]:
+    ) -> Tuple[bool, str | None, str | None, VideoInfo | None]:
         """
         Download an episode from YouTube
 
@@ -1538,7 +1575,7 @@ class Downloader:
         output_directory: Path,
         force: bool = False,
         dry_run: bool = False,
-    ) -> Tuple[bool, str | None, str | None, dict | None]:
+    ) -> Tuple[bool, str | None, str | None, VideoInfo | None]:
         """
         Download a video from a YouTube URL (generic method for extras, movies, etc.)
 
@@ -1795,7 +1832,7 @@ class Downloader:
 
     def get_episode_file_info(
         self, series: Series, episode: Episode, output_directory: Path
-    ) -> dict:
+    ) -> EpisodeFileInfo:
         """
         Get detailed information about existing files for an episode
 
@@ -1839,7 +1876,7 @@ class Downloader:
             if f.name.startswith(episode_pattern):
                 existing_files.append(f)
 
-        info: dict = {
+        info: EpisodeFileInfo = {
             "has_video": False,
             "has_strm": False,
             "video_file": None,

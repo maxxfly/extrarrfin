@@ -9,7 +9,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from .models import Series
+from .models import Series, VideoInfo
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +101,8 @@ class VideoScorer:
         ]
 
     def score_and_select_video(
-        self, videos: list, series: Series, episode_title: str
-    ) -> dict | None:
+        self, videos: list[VideoInfo], series: Series, episode_title: str
+    ) -> VideoInfo | None:
         """
         Score video results and select the best one
 
@@ -158,10 +158,10 @@ class VideoScorer:
 
     def _score_video(
         self,
-        video: dict,
+        video: VideoInfo,
         series_lower: str,
         episode_lower: str,
-        search_words: set,
+        search_words: set[str],
         network_lower: str | None,
         series_year: int | None,
     ) -> float:
@@ -200,7 +200,11 @@ class VideoScorer:
         return score
 
     def _score_title_match(
-        self, title_lower: str, series_lower: str, episode_lower: str, search_words: set
+        self,
+        title_lower: str,
+        series_lower: str,
+        episode_lower: str,
+        search_words: set[str],
     ) -> float:
         """Score based on title matching"""
         score = 0.0
@@ -554,7 +558,7 @@ class VideoScorer:
 
         return 0.0
 
-    def _select_best_video(self, scored_videos: list) -> dict | None:
+    def _select_best_video(self, scored_videos: list[VideoInfo]) -> VideoInfo | None:
         """Select the best video from scored list"""
         if not scored_videos:
             return None
@@ -584,11 +588,11 @@ class VideoScorer:
 
     def score_behind_scenes_videos(
         self,
-        videos: list,
+        videos: list[VideoInfo],
         series: Series,
         min_score: float = 65.0,
         max_results: int = 20,
-    ) -> list[dict]:
+    ) -> list[VideoInfo]:
         """
         Score behind the scenes video results based on title matching
 
@@ -852,7 +856,7 @@ class VideoScorer:
 
         return scored_videos
 
-    def remove_duplicate_videos(self, videos: list[dict]) -> list[dict]:
+    def remove_duplicate_videos(self, videos: list[VideoInfo]) -> list[VideoInfo]:
         """
         Remove duplicate videos based on title similarity and duration proximity
         Keeps the video with the highest score among duplicates
@@ -864,7 +868,7 @@ class VideoScorer:
         if not videos:
             return []
 
-        unique_videos: list[dict] = []
+        unique_videos: list[VideoInfo] = []
 
         for video in videos:
             is_duplicate = False
@@ -930,11 +934,11 @@ class VideoScorer:
 
     def score_theme_videos(
         self,
-        videos: list,
+        videos: list[VideoInfo],
         media_title: str,
         year: int | None = None,
         network: str | None = None,
-    ) -> dict | None:
+    ) -> VideoInfo | None:
         """
         Score YouTube search results to find the best musical theme.
 
@@ -1087,7 +1091,7 @@ class VideoScorer:
             "score",
         ]
 
-        scored: list[dict] = []
+        scored: list[VideoInfo] = []
 
         def _kw_match(kw: str, text: str) -> bool:
             """Match keyword in text.
@@ -1101,7 +1105,7 @@ class VideoScorer:
                 return bool(re.search(r"\b" + re.escape(kw) + r"\b", text))
             return kw in text
 
-        def _any_kw(keywords: list, text: str) -> bool:
+        def _any_kw(keywords: list[str], text: str) -> bool:
             return any(_kw_match(kw, text) for kw in keywords)
 
         has_primary_theme_candidate = any(

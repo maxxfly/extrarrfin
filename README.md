@@ -18,6 +18,7 @@
 - 🎬 **Radarr support** — download extras for movies (tag mode)
 - 🏷️ **Tag mode** — download behind-the-scenes via `want-extras` tag ([see TAG_MODE.md](TAG_MODE.md))
 - 🎵 **Theme music** — downloads `theme.mp3` for every series and movie (ThemerrDB → TelevisionTunes → YouTube) ⚠️ *work in progress — some titles may get incorrect matches (see below)*
+- 🔒 **`theme --no-fallback`** — curated sources only (ThemerrDB + TelevisionTunes), never a YouTube guess; unknown titles are reported failed instead
 - 🔎 **`list-themes`** — dedicated command to check `theme.mp3` status at a glance; `--more-info` adds Year & Network/Studio columns
 - 📝 **Subtitles** — automatic download and SRT conversion
 - 📺 **STRM mode** — streaming files instead of downloads (saves disk space)
@@ -73,10 +74,13 @@ python extrarrfin.py download
 
 The theme music mode (`theme-mode`) is still being fine-tuned. Known issues:
 
+- **ThemerrDB coverage** — the curated database only holds a theme for roughly 60 % of series and 35 % of movies; the rest fall through to TelevisionTunes / YouTube. Series are matched by TMDB ID, so a title without a TMDB ID in Sonarr cannot use this source.
 - **Wrong match on YouTube** — for short or generic titles (e.g. *The Bear*, *The Penguin*), the scorer may pick a video from an unrelated older show that shares a keyword.
 - **Orchestral/cover version** — the YouTube fallback may prefer a cover or orchestral arrangement over the original theme.
 - **TelevisionTunes false positive** — for titles with common words the slug-matching may land on a loosely related page.
 - **Permission errors** — if the destination folder is owned by root (e.g. previous Docker run), the download will fail with `Permission denied`. Fix ownership before running.
+
+**Avoiding the uncertain matches:** run `python extrarrfin.py theme --no-fallback` to use only the curated sources (ThemerrDB + TelevisionTunes). Titles no curated source knows are then reported as failed rather than filled with a scored YouTube guess.
 
 Use `--force` to retry a title and `--verbose` to see the scoring details. Contributions and score tuning are welcome.
 
@@ -84,7 +88,7 @@ Use `--force` to retry a title and `--verbose` to see the scoring details. Contr
 
 ## 📋 Prerequisites
 
-- Python 3.8+
+- Python 3.14+
 - Sonarr instance with API key (required)
 - Radarr instance with API key (optional, for movies)
 - FFmpeg

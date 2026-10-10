@@ -32,6 +32,10 @@ ENV/
 # Hidden directories and files (starting with .)
 .*
 !.gitignore
+# GitHub metadata must stay tracked: the bare "!<dir>/" exception is not enough,
+# because ".*" also matches the files *inside* that directory.
+!.github/
+!.github/**
 
 # Configuration personnelle
 config.yaml

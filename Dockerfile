@@ -1,7 +1,7 @@
 # Dockerfile for ExtrarrFin
 # Multi-stage build for optimized image size and faster builds
 
-FROM python:3.11-slim as base
+FROM python:3.14-slim as base
 
 # Set working directory
 WORKDIR /app

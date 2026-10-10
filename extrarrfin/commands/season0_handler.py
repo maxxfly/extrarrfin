@@ -27,7 +27,7 @@ def download_season0_mode(
     force: bool = False,
     no_scan: bool = False,
     verbose: bool = False,
-):
+) -> tuple[int, int, int]:
     """
     Download monitored season 0 episodes
 
@@ -119,7 +119,7 @@ def _download_series_season0(
     force: bool = False,
     no_scan: bool = False,
     verbose: bool = False,
-):
+) -> tuple[int, int, int]:
     """
     Download monitored season 0 episodes for a single series
 

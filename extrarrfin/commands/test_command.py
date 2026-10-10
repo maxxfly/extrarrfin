@@ -18,7 +18,7 @@ def test_command(
     radarr: RadarrClient | None,
     jellyfin_url: str | None,
     jellyfin_api_key: str | None,
-):
+) -> None:
     """Test connection to Sonarr, Radarr (if configured) and Jellyfin
 
     Args:

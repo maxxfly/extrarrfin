@@ -4,6 +4,7 @@ Base API Client for *arr applications (Sonarr, Radarr, etc.)
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
 from typing import Any, Generic, TypeVar
 
 import requests
@@ -17,7 +18,7 @@ T = TypeVar("T")
 class BaseArrClient(ABC, Generic[T]):
     """Base client for *arr applications API"""
 
-    def __init__(self, url: str, api_key: str):
+    def __init__(self, url: str, api_key: str) -> None:
         self.url = url.rstrip("/")
         self.api_key = api_key
         self.session = requests.Session()
@@ -27,14 +28,18 @@ class BaseArrClient(ABC, Generic[T]):
         # Cache for tags
         self._tags_cache: dict[int, str] | None = None
 
-    def _get(self, endpoint: str, params: dict | None = None) -> Any:
+    def _get(
+        self,
+        endpoint: str,
+        params: Mapping[str, Sequence[int] | int | str] | None = None,
+    ) -> Any:
         """Perform a GET request to the API"""
         url = f"{self.url}/api/v3/{endpoint}"
         response = self.session.get(url, params=params)
         response.raise_for_status()
         return response.json()
 
-    def _post(self, endpoint: str, data: dict) -> Any:
+    def _post(self, endpoint: str, data: Mapping[str, object]) -> Any:
         """Perform a POST request to the API"""
         url = f"{self.url}/api/v3/{endpoint}"
         response = self.session.post(url, json=data)

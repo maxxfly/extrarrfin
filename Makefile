@@ -1,4 +1,11 @@
-.PHONY: help install lint type check format clean test pytest
+# Tool binaries: use the local venv when it exists, otherwise fall back to
+# whatever is on PATH (CI installs into the system interpreter).
+BIN := $(if $(wildcard .venv/bin),.venv/bin/,)
+MYPY := $(BIN)mypy
+RUFF := $(BIN)ruff
+PYTEST := $(BIN)pytest
+
+.PHONY: help install lint type check format clean test pytest test-unit test-themerrdb ci
 
 help:
 	@echo "Available targets:"
@@ -9,26 +16,32 @@ help:
 	@echo "  format     - Format code with ruff"
 	@echo "  clean      - Remove Python cache files"
 	@echo "  test       - Run all checks (lint + type)"
+	@echo "  test-unit  - Run offline pytest suite (no internet needed)"
+	@echo "  ci         - Run what GitHub Actions runs (type + offline tests, no network)"
 	@echo "  pytest     - Run integration tests (requires internet)"
+	@echo "  test-themerrdb - Run ThemerrDB integration tests (requires internet)"
 
 install:
 	pip install -r requirements.txt
 
 lint:
 	@echo "Running ruff..."
-	ruff check extrarrfin/
+	$(RUFF) check extrarrfin/
 
 type:
 	@echo "Running mypy..."
-	mypy extrarrfin/ --python-version 3.10 --show-error-codes
+	$(MYPY) extrarrfin/ tests/ conftest.py --show-error-codes
+	# The entrypoint is checked in a separate invocation: mypy refuses to map
+	# extrarrfin.py and extrarrfin/__init__.py to the same module name at once.
+	$(MYPY) extrarrfin.py --show-error-codes
 
 check: lint type
 	@echo "All checks passed!"
 
 format:
 	@echo "Formatting with ruff..."
-	ruff format extrarrfin/
-	ruff check --fix extrarrfin/
+	$(RUFF) format extrarrfin/
+	$(RUFF) check --fix extrarrfin/
 
 clean:
 	@echo "Cleaning Python cache files..."
@@ -42,4 +55,17 @@ test: check
 
 pytest:
 	@echo "Running pytest integration tests..."
-	.venv/bin/pytest tests/ -v -m integration
+	$(PYTEST) tests/ -v -m integration
+
+test-unit:
+	@echo "Running offline unit tests (no network)..."
+	$(PYTEST) tests/ -v -m "not integration"
+
+test-themerrdb:
+	@echo "Running ThemerrDB tests (offline + real download, requires internet)..."
+	$(PYTEST) tests/test_themerrdb.py tests/test_theme_no_fallback.py tests/test_theme_no_fallback_cli.py -v
+	$(PYTEST) tests/test_themerrdb_download.py -v -m integration
+
+# What GitHub Actions runs: offline checks only, no network, no lint gate.
+ci: type test-unit
+	@echo "CI checks passed!"

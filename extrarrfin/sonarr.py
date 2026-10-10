@@ -49,6 +49,7 @@ class SonarrClient(BaseArrClient[Series]):
                 seasons=seasons,
                 year=item.get("year"),
                 tvdb_id=item.get("tvdbId"),
+                tmdb_id=item.get("tmdbId"),
                 network=item.get("network"),
                 tags=item.get("tags", []),
             )

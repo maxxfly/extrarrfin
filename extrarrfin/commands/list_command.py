@@ -3,6 +3,7 @@ List command - Display series with monitored season 0 or want-extras tag, and mo
 """
 
 import logging
+from collections.abc import Sequence
 from typing import Literal, TypedDict, cast
 
 from rich.console import Console
@@ -14,6 +15,7 @@ from extrarrfin.downloader import Downloader
 from extrarrfin.models import Movie, Series
 from extrarrfin.radarr import RadarrClient
 from extrarrfin.sonarr import SonarrClient
+from extrarrfin.utils import resolve_modes
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -30,17 +32,12 @@ def list_command(
     downloader: Downloader,
     radarr: RadarrClient | None = None,
     limit: str | None = None,
-    mode: tuple | None = None,
+    mode: Sequence[str] | None = None,
 ) -> None:
     """Execute the list command logic for series and movies"""
 
     # Use mode from command line or config
-    if mode:
-        active_modes = list(mode)
-    elif isinstance(config.mode, list):
-        active_modes = config.mode
-    else:
-        active_modes = [config.mode]
+    active_modes = resolve_modes(cli_modes=mode, config_modes=config.mode)
 
     # Fetch series and movies
     with Progress(

@@ -6,6 +6,21 @@ import logging
 import sys
 import time
 
+# Supported interpreter version. Declared in README/docs and pinned by the
+# Dockerfile and CI. Checked here, before importing the extrarrfin package, so
+# an unsupported interpreter gets this message instead of a crash at import
+# time (the package's PEP 604 unions are evaluated on import below 3.10).
+MIN_PYTHON = (3, 14)
+
+if sys.version_info < MIN_PYTHON:
+    required = ".".join(str(part) for part in MIN_PYTHON)
+    running = ".".join(str(part) for part in sys.version_info[:2])
+    sys.exit(
+        f"ExtrarrFin requires Python {required} or newer (running {running}).\n"
+        "If you use Docker, pull the image instead: "
+        "docker pull jeanmary/extrarrfin:latest"
+    )
+
 import click
 import schedule
 from rich.console import Console
@@ -28,7 +43,7 @@ from extrarrfin.downloader import Downloader
 from extrarrfin.jellyfin import JellyfinClient
 from extrarrfin.radarr import RadarrClient
 from extrarrfin.sonarr import SonarrClient
-from extrarrfin.utils import setup_logging
+from extrarrfin.utils import resolve_modes, setup_logging
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -56,17 +71,17 @@ console = Console()
 )
 @click.pass_context
 def cli(
-    ctx,
-    config,
-    sonarr_url,
-    sonarr_api_key,
-    radarr_url,
-    radarr_api_key,
-    media_dir,
-    sonarr_dir,
-    radarr_dir,
-    log_level,
-):
+    ctx: click.Context,
+    config: str | None,
+    sonarr_url: str | None,
+    sonarr_api_key: str | None,
+    radarr_url: str | None,
+    radarr_api_key: str | None,
+    media_dir: str | None,
+    sonarr_dir: str | None,
+    radarr_dir: str | None,
+    log_level: str,
+) -> None:
     """ExtrarrFin - Extras downloader for Sonarr (Series) and Radarr (Movies)"""
 
     # Setup logging
@@ -115,7 +130,7 @@ def cli(
     help="List mode: season0 (monitored Season 0 episodes), tag (series/movies with want-extras tag), or theme (theme.mp3 status). Can be specified multiple times.",
 )
 @click.pass_context
-def list(ctx, limit, mode):
+def list(ctx: click.Context, limit: str | None, mode: tuple[str, ...]) -> None:
     """List all series with monitored season 0 or tagged series/movies"""
 
     config: Config = ctx.obj["config"]
@@ -124,17 +139,11 @@ def list(ctx, limit, mode):
     radarr: RadarrClient | None = ctx.obj.get("radarr")
 
     # Determine which modes to run
-    modes = (
-        [*mode]
-        if mode
-        else (
-            [*config.mode]
-            if isinstance(config.mode, tuple)
-            else [config.mode]
-            if config.mode
-            else ["season0"]
-        )
-    )
+    try:
+        modes = resolve_modes(cli_modes=mode, config_modes=config.mode)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
 
     if "theme" in modes:
         list_themes(config, sonarr, downloader, radarr, limit)
@@ -155,7 +164,9 @@ def list(ctx, limit, mode):
     help="Show Year and Network/Studio columns (useful to build test_youtube_search.py cases)",
 )
 @click.pass_context
-def list_themes_cmd(ctx, limit, more_info):
+def list_themes_cmd(
+    ctx: click.Context, limit: str | None, more_info: bool
+) -> None:
     """List all series and movies showing whether theme.mp3 is downloaded.
 
     Shows a table with ✓/✗ status for each title that has at least one
@@ -213,19 +224,26 @@ def list_themes_cmd(ctx, limit, more_info):
     envvar="JELLYFIN_API_KEY",
     help="Jellyfin API key for library refresh",
 )
+@click.option(
+    "--no-fallback",
+    is_flag=True,
+    help="Theme mode only: use the curated sources (ThemerrDB + TelevisionTunes) "
+    "and skip the YouTube fallback.",
+)
 @click.pass_context
 def download(
-    ctx,
-    limit,
-    episode,
-    dry_run,
-    force,
-    no_scan,
-    verbose,
-    mode,
-    jellyfin_url,
-    jellyfin_api_key,
-):
+    ctx: click.Context,
+    limit: str | None,
+    episode: int | None,
+    dry_run: bool,
+    force: bool,
+    no_scan: bool,
+    verbose: bool,
+    mode: tuple[str, ...],
+    jellyfin_url: str | None,
+    jellyfin_api_key: str | None,
+    no_fallback: bool,
+) -> None:
     """Download missing season 0 episodes"""
 
     config: Config = ctx.obj["config"]
@@ -238,17 +256,11 @@ def download(
 
     # Determine which modes to run
     # Use mode from CLI if provided, otherwise use config, otherwise default to season0
-    modes = (
-        [*mode]
-        if mode
-        else (
-            [*config.mode]
-            if isinstance(config.mode, tuple)
-            else [config.mode]
-            if config.mode
-            else ["season0"]
-        )
-    )
+    try:
+        modes = resolve_modes(cli_modes=mode, config_modes=config.mode)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
 
     try:
         total_downloads = 0
@@ -295,6 +307,11 @@ def download(
 
             elif current_mode == "theme":
                 console.print("\n[bold magenta]Mode: Theme[/bold magenta]")
+                if no_fallback:
+                    console.print(
+                        "[dim]Curated sources only "
+                        "(ThemerrDB + TelevisionTunes) — YouTube fallback disabled[/dim]"
+                    )
                 total, success, failed = download_theme_mode(
                     config,
                     sonarr,
@@ -304,6 +321,7 @@ def download(
                     dry_run=dry_run,
                     force=force,
                     verbose=verbose,
+                    no_fallback=no_fallback,
                 )
                 total_downloads += total
                 successful_downloads += success
@@ -350,7 +368,7 @@ def download(
 @click.argument("series_id", type=int)
 @click.option("--dry-run", "-d", is_flag=True, help="Simulation mode (don't scan)")
 @click.pass_context
-def scan(ctx, series_id, dry_run):
+def scan(ctx: click.Context, series_id: int, dry_run: bool) -> None:
     """Trigger a manual scan of a series in Sonarr"""
 
     sonarr: SonarrClient = ctx.obj["sonarr"]
@@ -385,13 +403,27 @@ def scan(ctx, series_id, dry_run):
     is_flag=True,
     help="Verbose mode",
 )
+@click.option(
+    "--no-fallback",
+    is_flag=True,
+    help="Use only the curated sources (ThemerrDB + TelevisionTunes) and skip "
+    "the YouTube fallback. Titles without a curated theme are reported failed.",
+)
 @click.pass_context
-def theme(ctx, limit, dry_run, force, verbose):
+def theme(
+    ctx: click.Context,
+    limit: str | None,
+    dry_run: bool,
+    force: bool,
+    verbose: bool,
+    no_fallback: bool,
+) -> None:
     """Download musical themes (theme.mp3) for all series and movies
 
-    Searches YouTube for 'Theme <title>' and saves the result as theme.mp3
-    directly in the root folder of each series/movie.
-    The download is skipped when theme.mp3 already exists.
+    Looks the theme up in ThemerrDB first, then TelevisionTunes, then falls
+    back to a scored YouTube search (--no-fallback disables that last step).
+    The result is saved as theme.mp3 directly in the root folder of each
+    series/movie, and skipped when theme.mp3 already exists.
     """
     config: Config = ctx.obj["config"]
     sonarr: SonarrClient = ctx.obj["sonarr"]
@@ -399,6 +431,12 @@ def theme(ctx, limit, dry_run, force, verbose):
     radarr: RadarrClient | None = ctx.obj.get("radarr")
 
     downloader.verbose = verbose
+
+    if no_fallback:
+        console.print(
+            "[dim]Curated sources only (ThemerrDB + TelevisionTunes) — "
+            "YouTube fallback disabled[/dim]"
+        )
 
     try:
         total, successful, failed = download_theme_mode(
@@ -410,6 +448,7 @@ def theme(ctx, limit, dry_run, force, verbose):
             dry_run=dry_run,
             force=force,
             verbose=verbose,
+            no_fallback=no_fallback,
         )
 
         console.print("\n[bold]Theme download summary:[/bold]")
@@ -438,7 +477,9 @@ def theme(ctx, limit, dry_run, force, verbose):
     help="Jellyfin API key for library refresh",
 )
 @click.pass_context
-def test(ctx, jellyfin_url, jellyfin_api_key):
+def test(
+    ctx: click.Context, jellyfin_url: str | None, jellyfin_api_key: str | None
+) -> None:
     """Test connection to Sonarr, Radarr (if configured) and Jellyfin"""
     config: Config = ctx.obj["config"]
     sonarr: SonarrClient = ctx.obj["sonarr"]
@@ -479,10 +520,25 @@ def test(ctx, jellyfin_url, jellyfin_api_key):
     type=click.Choice(["seconds", "minutes", "hours", "days", "weeks"]),
     help="Override schedule unit from config",
 )
+@click.option(
+    "--no-fallback",
+    is_flag=True,
+    help="Theme mode only: use the curated sources (ThemerrDB + TelevisionTunes) "
+    "and skip the YouTube fallback.",
+)
 @click.pass_context
 def schedule_mode(
-    ctx, limit, episode, dry_run, force, no_scan, verbose, interval, unit
-):
+    ctx: click.Context,
+    limit: str | None,
+    episode: int | None,
+    dry_run: bool,
+    force: bool,
+    no_scan: bool,
+    verbose: bool,
+    interval: int | None,
+    unit: str | None,
+    no_fallback: bool,
+) -> None:
     """Run downloads on a schedule"""
 
     config: Config = ctx.obj["config"]
@@ -502,7 +558,7 @@ def schedule_mode(
     console.print(f"Running downloads every {schedule_interval} {schedule_unit}")
     console.print("Press Ctrl+C to stop\n")
 
-    def run_download():
+    def run_download() -> None:
         """Run the download command"""
         try:
             console.print(f"\n[bold blue]{'=' * 60}[/bold blue]")
@@ -520,6 +576,7 @@ def schedule_mode(
                 force=force,
                 no_scan=no_scan,
                 verbose=verbose,
+                no_fallback=no_fallback,
             )
 
             console.print(
@@ -558,7 +615,7 @@ def schedule_mode(
         sys.exit(0)
 
 
-def main():
+def main() -> None:
     """Main entry point"""
     cli(obj={})
 

@@ -31,7 +31,7 @@ class Config:
         "season0"  # "season0", "tag", "theme", or a list e.g. ["season0", "tag", "theme"]
     )
     # Subtitle options
-    subtitle_languages: list = field(
+    subtitle_languages: list[str] = field(
         default_factory=lambda: ["fr", "en", "fr-FR", "en-US", "en-GB"]
     )
     download_all_subtitles: bool = False
@@ -44,7 +44,7 @@ class Config:
     min_score: float = 50.0  # Minimum score to accept a video match
     youtube_search_results: int = 10  # Number of YouTube results to fetch (5-20)
     # Movie extras search keywords (configurable)
-    movie_extras_keywords: list = field(
+    movie_extras_keywords: list[str] = field(
         default_factory=lambda: [
             "behind the scenes",
             "making of",
@@ -119,7 +119,7 @@ class Config:
 
         return cls(**config_data)
 
-    def to_file(self, config_path: Path):
+    def to_file(self, config_path: Path) -> None:
         """Save configuration to a YAML file"""
         data = {
             "sonarr_url": self.sonarr_url,

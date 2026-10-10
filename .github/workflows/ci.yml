@@ -1,0 +1,125 @@
+# CI for ExtrarrFin.
+#
+# Scope, on purpose:
+#   - no ruff here. 82 lint findings + 4 unformatted files stay a local concern
+#     (`make lint` / `make format`); a red gate that nobody intends to clear
+#     only trains everyone to ignore the badge.
+#   - no Docker build. Building an image nobody pushes validates the Dockerfile
+#     and nothing else; the Python suite below is what protects the code.
+#   - no network. Everything here runs offline and deterministic. The tests that
+#     hit YouTube / ThemerrDB / TelevisionTunes are marked `integration` and live
+#     in integration.yml, off the pull-request critical path.
+#
+# The three jobs are independent and run in parallel; each is a required status
+# check on master. `make` is used where it already encodes the right command so
+# CI and local runs cannot drift apart.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep in sync with MIN_PYTHON in extrarrfin.py, mypy.ini and the Dockerfile.
+  PYTHON_VERSION: "3.14"
+
+jobs:
+  type-check:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: make install
+
+      # `make type` runs mypy twice on purpose: extrarrfin.py and extrarrfin/
+      # cannot be checked in one invocation (duplicate module name).
+      # With no .venv on the runner, the Makefile resolves bare `mypy` from PATH.
+      - name: mypy
+        run: make type
+
+  test:
+    name: Offline tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: make install
+
+      # `make test-unit` deselects `-m integration`.
+      - name: pytest
+        run: make test-unit
+
+  smoke:
+    name: CLI smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: make install
+
+      # Importing every module catches breakage that unit tests miss: a module
+      # nobody imports in tests can still be broken at runtime.
+      - name: Import every module
+        run: |
+          python - <<'PY'
+          import importlib
+          import pkgutil
+
+          import extrarrfin
+
+          names = [
+              m.name
+              for m in pkgutil.walk_packages(extrarrfin.__path__, "extrarrfin.")
+          ]
+          for name in names:
+              importlib.import_module(name)
+          print(f"imported {len(names)} submodules")
+          PY
+
+      # Group-level --help is the only help that is safe offline: Click handles
+      # it before invoking the group callback, which otherwise validates the
+      # Sonarr connection and needs a live server (a per-command `theme --help`
+      # passes locally only because a reachable config.yaml exists there).
+      # Asserting the command list also catches a registration typo.
+      - name: CLI help and command registry
+        run: |
+          python extrarrfin.py --help | tee help.txt
+          for cmd in download list list-themes scan schedule-mode test theme; do
+            grep -qE "^  $cmd +[^ ]" help.txt || { echo "missing command: $cmd"; exit 1; }
+          done

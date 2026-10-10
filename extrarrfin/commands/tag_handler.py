@@ -29,7 +29,7 @@ def download_tag_mode(
     force: bool = False,
     no_scan: bool = False,
     verbose: bool = False,
-):
+) -> tuple[int, int, int]:
     """
     Download behind the scenes videos for series and movies with want-extras tag
 
@@ -132,7 +132,7 @@ def _download_series_extras(
     force: bool = False,
     no_scan: bool = False,
     verbose: bool = False,
-):
+) -> tuple[int, int, int]:
     """
     Download behind the scenes videos for a single series
 
@@ -309,7 +309,7 @@ def _download_movie_extras(
     force: bool = False,
     no_scan: bool = False,
     verbose: bool = False,
-):
+) -> tuple[int, int, int]:
     """Download behind the scenes extras for a movie"""
     total_downloads = 0
     successful_downloads = 0

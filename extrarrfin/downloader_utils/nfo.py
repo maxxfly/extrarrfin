@@ -5,6 +5,8 @@ NFO file creation for Jellyfin/Kodi compatibility
 import logging
 from pathlib import Path
 
+from ..models import VideoInfo
+
 logger = logging.getLogger(__name__)
 
 
@@ -12,8 +14,12 @@ class NFOWriter:
     """Creates NFO metadata files for media"""
 
     @staticmethod
-    def _escape_xml(text: str) -> str:
-        """Escape special XML characters to prevent invalid NFO files"""
+    def _escape_xml(text: object) -> str:
+        """Escape special XML characters to prevent invalid NFO files.
+
+        Accepts any yt-dlp value: keys may be missing or ``None``, and the body
+        already coerces with ``str()`` after the falsy guard.
+        """
         if not text:
             return ""
         return (
@@ -29,7 +35,7 @@ class NFOWriter:
     def create_nfo_file(
         base_filename: str,
         output_directory: Path,
-        video_info: dict,
+        video_info: VideoInfo,
         nfo_type: str = "episode",
     ) -> None:
         """

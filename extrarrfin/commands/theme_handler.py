@@ -9,6 +9,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from extrarrfin.config import Config
 from extrarrfin.downloader import Downloader
+from extrarrfin.models import Series
 from extrarrfin.radarr import RadarrClient
 from extrarrfin.sonarr import SonarrClient
 
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 
-def _series_has_content(series) -> bool:
+def _series_has_content(series: Series) -> bool:
     """Return True if the series has at least one downloaded episode file."""
     return any(s.statistics.get("episodeFileCount", 0) > 0 for s in series.seasons)
 
@@ -30,14 +31,19 @@ def download_theme_mode(
     dry_run: bool = False,
     force: bool = False,
     verbose: bool = False,
-):
+    no_fallback: bool = False,
+) -> tuple[int, int, int]:
     """
     Download musical themes (theme.mp3) for all series and movies.
 
     Sources are tried in order for each title:
-      1. ThemerrDB — direct lookup by TVDB/TMDB ID
+      1. ThemerrDB — curated lookup by TMDB ID (IMDb ID as alternate key for
+         movies)
       2. TelevisionTunes — web search + MP3 download
       3. YouTube — scored yt-dlp search (fallback)
+
+    When *no_fallback* is True, step 3 is skipped and only the two curated
+    sources are used.
 
     Saves the result as theme.mp3 in the root folder of each series/movie.
     Skips entries where theme.mp3 already exists.
@@ -96,8 +102,9 @@ def download_theme_mode(
             dry_run=dry_run,
             force=force,
             year=series.year,
-            tvdb_id=series.tvdb_id,
+            tmdb_id=series.tmdb_id,
             network=series.network,
+            no_fallback=no_fallback,
         )
 
         if ok:
@@ -159,8 +166,10 @@ def download_theme_mode(
                 force=force,
                 year=movie.year,
                 tmdb_id=movie.tmdb_id,
+                imdb_id=movie.imdb_id,
                 network=movie.studio,
                 is_series=False,
+                no_fallback=no_fallback,
             )
 
             if ok:

@@ -101,6 +101,21 @@ chmod +x /usr/local/bin/extrarrfin-run.sh
 
 ## Troubleshooting
 
+### Nothing is downloaded (`Total: 0`, exit code 0)
+
+The run reports success but downloads nothing. This means **no mode was selected**, and the usual cause is a `mode:` value the running version cannot read.
+
+```bash
+# Confirm which modes are actually selected
+python extrarrfin.py download --dry-run --verbose
+```
+
+- `mode: "season0"` (string) and `mode: ["season0", "tag"]` (list) are both supported — the list form requires the fixed mode resolution.
+- A mode outside `season0` / `tag` / `theme` is now rejected with `Error: unknown mode(s): …` and exit code 1, instead of silently running nothing.
+- `--mode` on the command line always overrides `config.yaml`.
+
+> **Versions before this fix** silently wrapped a list-valued `mode` into a nested list, so `mode: ["season0", "tag"]` selected no mode at all and exited with code 0. If you cannot upgrade, use the single-string form or pass `--mode season0 --mode tag` explicitly.
+
 ### No video found on YouTube
 
 The tool searches in two steps:

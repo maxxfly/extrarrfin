@@ -39,6 +39,7 @@ class RadarrClient(BaseArrClient[Movie]):
                 monitored=item["monitored"],
                 year=item.get("year"),
                 tmdb_id=item.get("tmdbId"),
+                imdb_id=item.get("imdbId"),
                 studio=item.get("studio"),
                 tags=item.get("tags", []),
                 has_file=item.get("hasFile", False),

@@ -186,7 +186,7 @@ python extrarrfin.py download --jellyfin-url http://localhost:8096 --jellyfin-ap
 
 ## `theme`
 
-Search YouTube for `Theme <title>` and save the result as `theme.mp3` in the root folder of each series/movie.  
+Resolve each theme in **ThemerrDB**, then **TelevisionTunes**, then fall back to a scored **YouTube** search, and save the result as `theme.mp3` in the root folder of each series/movie.  
 → See full documentation: [docs/theme-mode.md](theme-mode.md)
 
 ```bash
@@ -194,7 +194,23 @@ python extrarrfin.py theme
 python extrarrfin.py theme --limit "Breaking Bad"
 python extrarrfin.py theme --dry-run
 python extrarrfin.py theme --force
+
+# Curated sources only: never fall back to a YouTube search
+python extrarrfin.py theme --no-fallback
+python extrarrfin.py theme --no-fallback --dry-run
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--limit`, `-l` | Only a specific series/movie (name or Sonarr/Radarr ID) |
+| `--dry-run`, `-d` | Show the chosen source without downloading |
+| `--force`, `-f` | Re-download even when `theme.mp3` exists |
+| `--verbose`, `-v` | Detailed search/scoring output |
+| `--no-fallback` | Use only ThemerrDB + TelevisionTunes, skip the YouTube fallback |
+
+With `--no-fallback`, only **curated** themes are used, so the result is always a manually verified match — never a guess. Titles that no curated source knows are reported as **failed** instead of being filled with a YouTube search result. This is the option to use when you want quality over coverage, and it also makes the run much faster (no YouTube search).
+
+`--no-fallback` is also accepted by `download --mode theme` and `schedule-mode`.
 
 ---
 

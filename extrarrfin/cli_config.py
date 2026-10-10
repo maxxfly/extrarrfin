@@ -113,7 +113,7 @@ def validate_sonarr_connection(config: Config) -> SonarrClient:
 def setup_context(
     config: Config,
     sonarr_client: SonarrClient,
-) -> dict:
+) -> dict[str, object]:
     """
     Setup CLI context with config, sonarr client and downloader
 

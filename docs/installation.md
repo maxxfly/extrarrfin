@@ -4,7 +4,7 @@
 
 ## Prerequisites
 
-- Python 3.8+
+- Python 3.14+
 - An operational **Sonarr** instance with API access (required)
 - An operational **Radarr** instance with API access (optional, for movies)
 - **FFmpeg** (required by yt-dlp for audio/video conversion)
